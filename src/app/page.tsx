@@ -1,5 +1,5 @@
 import { CharacterBackgroundForm } from "@/components/CharacterBackgroundForm";
-import { DialogueScriptForm } from "@/components/DialogueScriptForm";
+import { PodcastGeneratorForm} from "@/components/DialogueScriptForm";
 import { VoiceAnimationForm } from "@/components/VoiceAnimationForm";
 import { FinalizePodcastForm } from "@/components/FinalizePodcastForm";
 
@@ -17,7 +17,7 @@ export default function Home() {
 
       <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
         <CharacterBackgroundForm />
-        <DialogueScriptForm />
+        <PodcastGeneratorForm />
         <VoiceAnimationForm />
         <FinalizePodcastForm />
       </div>
