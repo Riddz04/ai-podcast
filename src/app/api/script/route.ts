@@ -171,12 +171,18 @@ function parseScript(script: string, personality1: string, personality2: string)
 
 async function generateAudioSegments(segments: ScriptSegment[], voice1Type: VoiceKey, voice2Type: VoiceKey): Promise<AudioSegment[]> {
   const audioSegments: AudioSegment[] = [];
+  let quotaExceeded = false;
   
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
     let currentVoiceId: string | null = null; // To store the voiceId used
     
     try {
+      // If quota already exceeded, don't attempt ElevenLabs API calls
+      if (quotaExceeded) {
+        throw new Error('ElevenLabs quota exceeded, using fallback');
+      }
+      
       // Choose voice based on which personality is speaking
       currentVoiceId = segment.isPersonality1 
         ? PERSONALITY_VOICES[voice1Type] || PERSONALITY_VOICES.default_male
@@ -201,11 +207,28 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
     } catch (error) {
       console.error(`Error generating audio for segment ${i}:`, error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error during audio generation';
-      // Add a placeholder for failed segments
+      
+      // Check if this is a quota exceeded error
+      if (error instanceof Error && errorMessage.includes('quota_exceeded')) {
+        console.log('ElevenLabs quota exceeded, switching to fallback for remaining segments');
+        quotaExceeded = true;
+      }
+      
+      // Generate a fallback audio or use a placeholder
+      let fallbackAudio = null;
+      try {
+        // Here you could implement a fallback TTS solution
+        // For now, we'll use a simple base64 placeholder
+        fallbackAudio = await generateFallbackAudio(segment.text);
+      } catch (fallbackError) {
+        console.error('Fallback audio generation also failed:', fallbackError);
+      }
+      
+      // Add a placeholder or fallback for failed segments
       audioSegments.push({
         ...segment, // Spread the original segment properties
         segmentIndex: i,
-        audioBase64: null,
+        audioBase64: fallbackAudio,
         error: errorMessage,
         voiceId: currentVoiceId // Log the voiceId that was attempted
       });
@@ -213,6 +236,23 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
   }
   
   return audioSegments;
+}
+
+// Simple fallback audio generation function
+async function generateFallbackAudio(text: string): Promise<string | null> {
+  // This is a placeholder function
+  // In a real implementation, you would integrate with a free TTS service
+  // or use the Web Speech API on the client side
+  
+  // For now, return null to indicate no audio available
+  // The client can handle this by showing a message that audio is unavailable
+  console.log('Using fallback audio generation for:', text.substring(0, 30) + '...');
+  return null;
+  
+  // If you want to implement a real fallback, you could use:
+  // 1. Browser's Web Speech API (client-side)
+  // 2. A free TTS API with higher limits
+  // 3. A local TTS solution
 }
 
 async function generateSingleAudio(text: string, voiceId: string): Promise<string> {

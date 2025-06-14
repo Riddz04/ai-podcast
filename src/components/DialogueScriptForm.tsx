@@ -1,47 +1,99 @@
-"use client"
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState, useRef } from "react";
-import { Play, Pause, Download, Volume2 } from "lucide-react";
+'use client';
 
-export function PodcastGeneratorForm() {
-  const [podcastTopic, setPodcastTopic] = useState("");
-  const [personality1, setPersonality1] = useState("");
-  const [personality2, setPersonality2] = useState("");
-  const [voice1Type, setVoice1Type] = useState("male_confident");
-  const [voice2Type, setVoice2Type] = useState("female_clear");
-  
+import { useState, useRef, useEffect } from 'react';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { useAuth } from '@/lib/AuthContext';
+import { savePodcast } from '@/lib/podcastService';
+import { toast } from '@/components/ui/use-toast';
+
+interface Personality {
+  name: string;
+  voice: string;
+}
+
+interface PodcastSegment {
+  personality: string;
+  text: string;
+  audioUrl: string;
+}
+
+interface PodcastData {
+  id?: string;
+  userId: string;
+  title: string;
+  topic: string;
+  personality1: string;
+  personality2: string;
+  script: string;
+  audioUrl?: string;
+  createdAt?: any;
+}
+
+export default function DialogueScriptForm() {
+  const { user } = useAuth();
+  const [topic, setTopic] = useState('');
+  const [personalities, setPersonalities] = useState<Personality[]>([{ name: '', voice: '' }]);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [podcastData, setPodcastData] = useState(null);
-  const [currentlyPlaying, setCurrentlyPlaying] = useState(null);
-  const [playingSegment, setPlayingSegment] = useState(null);
-  
-  const audioRefs = useRef({});
+  const [generatedSegments, setGeneratedSegments] = useState<PodcastSegment[]>([]);
+  const [fullScript, setFullScript] = useState('');
+  const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const audioRefs = useRef<(HTMLAudioElement | null)[]>([]);
 
-  const voiceOptions = {
-    // Male voices
-    "male_confident": "Male - Confident (Domi)",
-    "male_deep": "Male - Deep (Josh)",
-    "male_friendly": "Male - Friendly (Antoni)",
-    
-    // Female voices
-    "female_clear": "Female - Clear (Rachel)",
-    "female_young": "Female - Young (Bella)",
-    "female_expressive": "Female - Expressive (Elli)"
+  const handleTopicChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setTopic(e.target.value);
+  };
+
+  const handlePersonalityNameChange = (index: number, value: string) => {
+    const newPersonalities = [...personalities];
+    newPersonalities[index].name = value;
+    setPersonalities(newPersonalities);
+  };
+
+  const handlePersonalityVoiceChange = (index: number, value: string) => {
+    const newPersonalities = [...personalities];
+    newPersonalities[index].voice = value;
+    setPersonalities(newPersonalities);
+  };
+
+  const addPersonality = () => {
+    setPersonalities([...personalities, { name: '', voice: '' }]);
+  };
+
+  const removePersonality = (index: number) => {
+    if (personalities.length > 1) {
+      const newPersonalities = [...personalities];
+      newPersonalities.splice(index, 1);
+      setPersonalities(newPersonalities);
+    }
   };
 
   const generatePodcast = async () => {
-    if (!personality1 || !personality2 || !podcastTopic) {
-      alert("Please fill in all required fields");
+    if (!topic || personalities.some(p => !p.name || !p.voice)) {
+      toast({
+        title: "Missing information",
+        description: "Please fill in all fields before generating the podcast.",
+        variant: "destructive"
+      });
       return;
     }
 
     setIsGenerating(true);
+    setGeneratedSegments([]);
+    setFullScript('');
+
     try {
+      // Map the first two personalities to the API format
+      const personality1 = personalities[0]?.name || '';
+      const personality2 = personalities[1]?.name || '';
+      const voice1Type = personalities[0]?.voice || 'male_confident';
+      const voice2Type = personalities[1]?.voice || 'female_clear';
+      
       const response = await fetch('/api/script', {
         method: 'POST',
         headers: {
@@ -50,7 +102,7 @@ export function PodcastGeneratorForm() {
         body: JSON.stringify({
           personality1,
           personality2,
-          podcastTopic,
+          podcastTopic: topic,
           voice1Type,
           voice2Type
         }),
@@ -61,227 +113,342 @@ export function PodcastGeneratorForm() {
       }
 
       const data = await response.json();
-      setPodcastData(data);
+      
+      // Check if there was an API quota error
+      const hasQuotaError = data.audioSegments.some((segment: any) => 
+        segment.error && segment.error.includes('quota_exceeded')
+      );
+      
+      if (hasQuotaError) {
+        toast({
+          title: "API Quota Exceeded",
+          description: "Some audio segments couldn't be generated due to ElevenLabs API quota limitations. You can still save the podcast with available audio or try again later.",
+          variant: "warning"
+        });
+      }
+      
+      // Map the API response to our component's expected format
+      const segments = data.audioSegments.map((segment: any) => ({
+        personality: segment.speaker,
+        text: segment.text,
+        audioUrl: segment.audioBase64 ? `data:audio/mpeg;base64,${segment.audioBase64}` : null,
+        error: segment.error
+      }));
+      
+      setGeneratedSegments(segments);
+      setFullScript(data.script);
     } catch (error) {
       console.error('Error generating podcast:', error);
-      alert('Error generating podcast. Please try again.');
+      toast({
+        title: "Generation failed",
+        description: "There was an error generating your podcast. Please try again.",
+        variant: "destructive"
+      });
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const playAudioSegment = (segmentIndex) => {
-    const segment = podcastData?.audioSegments[segmentIndex];
-    if (!segment.audioBase64) return;
-
-    // Stop currently playing audio
-    if (currentlyPlaying) {
-      currentlyPlaying.pause();
-      currentlyPlaying.currentTime = 0;
+  const playSegment = (index: number) => {
+    // Check if this segment has audio
+    if (!generatedSegments[index].audioUrl) {
+      toast({
+        title: "Audio Unavailable",
+        description: generatedSegments[index].error?.includes('quota_exceeded') 
+          ? "ElevenLabs API quota exceeded. Try again later or contact support."
+          : "Audio generation failed for this segment.",
+        variant: "destructive"
+      });
+      return;
     }
-
-    // Create audio element if it doesn't exist
-    if (!audioRefs.current[segmentIndex]) {
-      const audioBlob = new Blob(
-        [Uint8Array.from(atob(segment.audioBase64), c => c.charCodeAt(0))],
-        { type: 'audio/mpeg' }
-      );
-      const audioUrl = URL.createObjectURL(audioBlob);
-      const audio = new Audio(audioUrl);
-      
-      audio.onended = () => {
-        setCurrentlyPlaying(null);
-        setPlayingSegment(null);
-        // Auto-play next segment
-        if (segmentIndex < podcastData.audioSegments.length - 1) {
-          playAudioSegment(segmentIndex + 1);
-        }
-      };
-      
-      audioRefs.current[segmentIndex] = audio;
-    }
-
-    const audio = audioRefs.current[segmentIndex];
-    audio.play();
-    setCurrentlyPlaying(audio);
-    setPlayingSegment(segmentIndex);
-  };
-
-  const pauseAudio = () => {
-    if (currentlyPlaying) {
-      currentlyPlaying.pause();
+    
+    if (currentlyPlaying === index) {
+      audioRefs.current[index]?.pause();
       setCurrentlyPlaying(null);
-      setPlayingSegment(null);
+    } else {
+      if (currentlyPlaying !== null && audioRefs.current[currentlyPlaying]) {
+        audioRefs.current[currentlyPlaying]?.pause();
+      }
+      audioRefs.current[index]?.play();
+      setCurrentlyPlaying(index);
     }
   };
 
-  const playAllSegments = async () => {
-    if (podcastData?.audioSegments?.length > 0) {
-      playAudioSegment(0);
+  const playAll = async () => {
+    if (currentlyPlaying !== null) {
+      audioRefs.current[currentlyPlaying]?.pause();
+      setCurrentlyPlaying(null);
+      return;
+    }
+
+    // Check if any segments have audio
+    const hasAudio = generatedSegments.some(segment => segment.audioUrl !== null);
+    if (!hasAudio) {
+      toast({
+        title: "No Audio Available",
+        description: "None of the segments have audio available. API quota may be exceeded.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    for (let i = 0; i < generatedSegments.length; i++) {
+      // Skip segments without audio
+      if (!generatedSegments[i].audioUrl) {
+        toast({
+          title: "Skipping Segment",
+          description: `No audio available for ${generatedSegments[i].personality}. ${generatedSegments[i].error?.includes('quota_exceeded') ? 'API quota exceeded.' : ''}`
+        });
+        continue;
+      }
+      
+      setCurrentlyPlaying(i);
+      audioRefs.current[i]?.play();
+      await new Promise(resolve => {
+        audioRefs.current[i]?.addEventListener('ended', resolve, { once: true });
+      });
+    }
+    setCurrentlyPlaying(null);
+  };
+
+  const downloadScript = () => {
+    const element = document.createElement('a');
+    const file = new Blob([fullScript], { type: 'text/plain' });
+    element.href = URL.createObjectURL(file);
+    element.download = `podcast-script-${new Date().toISOString().split('T')[0]}.txt`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  const savePodcastToLibrary = async () => {
+    if (!user || !fullScript || generatedSegments.length === 0) {
+      toast({
+        title: "Cannot save podcast",
+        description: "Please generate a podcast first and make sure you're logged in.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check if any segments have audio
+    const segmentsWithAudio = generatedSegments.filter(segment => segment.audioUrl !== null);
+    if (segmentsWithAudio.length === 0) {
+      toast({
+        title: "Cannot Save",
+        description: "No audio segments are available. API quota may be exceeded.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // Find the first segment with audio to use as a preview
+      const audioSegment = segmentsWithAudio[0];
+      if (!audioSegment || !audioSegment.audioUrl) {
+        throw new Error("No valid audio segments found");
+      }
+      
+      // Convert the audio URL to a blob
+      const response = await fetch(audioSegment.audioUrl);
+      const audioBlob = await response.blob();
+      
+      // Convert the audio blob to a base64 string
+      const reader = new FileReader();
+      const audioBase64Promise = new Promise<string>((resolve) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(audioBlob);
+      });
+      const audioBase64 = await audioBase64Promise;
+      
+      // Create a title from the topic, ensuring it's not too long
+      const podcastTitle = topic.length > 50 
+        ? `${topic.substring(0, 47)}...` 
+        : topic;
+      
+      const podcastId = await savePodcast({
+        userId: user.uid,
+        title: podcastTitle,
+        personality1: personalities[0]?.name || 'Speaker 1',
+        personality2: personalities[1]?.name || 'Speaker 2',
+        script: fullScript,
+        topic,
+        createdAt: new Date()
+      }, audioBase64);
+
+      toast({
+        title: "Podcast saved",
+        description: "Your podcast has been saved to your library.",
+      });
+      
+      // Optional: Redirect to the library tab
+      const libraryTab = document.querySelector('[data-value="saved"]') as HTMLElement;
+      if (libraryTab) {
+        libraryTab.click();
+      }
+    } catch (error) {
+      console.error('Error saving podcast:', error);
+      toast({
+        title: "Save failed",
+        description: "There was an error saving your podcast. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsSaving(false);
     }
   };
 
-  const downloadPodcast = () => {
-    // This would require additional backend processing to combine all audio segments
-    // For now, we'll download the script
-    const scriptBlob = new Blob([podcastData.script], { type: 'text/plain' });
-    const url = URL.createObjectURL(scriptBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `podcast-${personality1}-${personality2}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  useEffect(() => {
+    audioRefs.current = audioRefs.current.slice(0, generatedSegments.length);
+  }, [generatedSegments]);
 
   return (
-    <Card className="col-span-1 md:col-span-1 lg:col-span-1">
+    <Card className="w-full max-w-4xl mx-auto bg-card dark:bg-card shadow-lg">
       <CardHeader>
-        <CardTitle>AI Podcast Generator</CardTitle>
-        <CardDescription>Generate a realistic podcast conversation between any two personalities.</CardDescription>
+        <CardTitle className="text-2xl font-bold">Create Your Podcast</CardTitle>
+        <CardDescription>
+          Enter a topic and add personalities to generate a podcast conversation.
+        </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div>
-          <Label htmlFor="podcast-topic">Podcast Topic</Label>
-          <Textarea 
-            id="podcast-topic"
-            value={podcastTopic}
-            onChange={(e) => setPodcastTopic(e.target.value)}
-            placeholder="e.g., The future of artificial intelligence in healthcare"
+      <CardContent className="space-y-6">
+        <div className="space-y-2">
+          <Label htmlFor="topic">Podcast Topic</Label>
+          <Textarea
+            id="topic"
+            placeholder="Enter a detailed description of what you want your podcast to be about..."
+            value={topic}
+            onChange={handleTopicChange}
+            className="min-h-[100px]"
           />
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="personality1">First Personality</Label>
-            <Input 
-              id="personality1"
-              value={personality1}
-              onChange={(e) => setPersonality1(e.target.value)}
-              placeholder="e.g., Elon Musk"
-            />
-          </div>
-          <div>
-            <Label htmlFor="personality2">Second Personality</Label>
-            <Input 
-              id="personality2"
-              value={personality2}
-              onChange={(e) => setPersonality2(e.target.value)}
-              placeholder="e.g., Oprah Winfrey"
-            />
-          </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="voice1">Voice for {personality1 || 'First Personality'}</Label>
-            <Select value={voice1Type} onValueChange={setVoice1Type}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(voiceOptions).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label>Personalities</Label>
+            <Button 
+              type="button" 
+              variant="outline" 
+              size="sm" 
+              onClick={addPersonality}
+              className="text-sm"
+            >
+              Add Personality
+            </Button>
           </div>
-          <div>
-            <Label htmlFor="voice2">Voice for {personality2 || 'Second Personality'}</Label>
-            <Select value={voice2Type} onValueChange={setVoice2Type}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(voiceOptions).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>{label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
 
-        <Button 
-          onClick={generatePodcast} 
-          className="w-full" 
+          {personalities.map((personality, index) => (
+            <div key={index} className="grid gap-4 p-4 border rounded-lg bg-background/50">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor={`personality-${index}`}>Name/Character</Label>
+                  <Input
+                    id={`personality-${index}`}
+                    placeholder="e.g., John, Expert, Host"
+                    value={personality.name}
+                    onChange={(e) => handlePersonalityNameChange(index, e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor={`voice-${index}`}>Voice</Label>
+                  <Select
+                    value={personality.voice}
+                    onValueChange={(value) => handlePersonalityVoiceChange(index, value)}
+                  >
+                    <SelectTrigger id={`voice-${index}`}>
+                      <SelectValue placeholder="Select a voice" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="male_confident">Male - Confident</SelectItem>
+                      <SelectItem value="male_deep">Male - Deep</SelectItem>
+                      <SelectItem value="male_friendly">Male - Friendly</SelectItem>
+                      <SelectItem value="female_clear">Female - Clear</SelectItem>
+                      <SelectItem value="female_young">Female - Young</SelectItem>
+                      <SelectItem value="female_expressive">Female - Expressive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {personalities.length > 1 && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => removePersonality(index)}
+                  className="w-full mt-2"
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-col space-y-4">
+        <Button
+          onClick={generatePodcast}
           disabled={isGenerating}
+          className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium py-2 rounded-md transition-all duration-200 shadow-md hover:shadow-lg"
         >
-          {isGenerating ? 'Generating Podcast...' : 'Generate Podcast'}
+          {isGenerating ? 'Generating...' : 'Generate Podcast'}
         </Button>
 
-        {podcastData && (
-          <div className="mt-6 space-y-4">
-            <div className="flex gap-2">
-              <Button onClick={playAllSegments} variant="outline" size="sm">
-                <Play className="w-4 h-4 mr-2" />
-                Play All
-              </Button>
-              <Button onClick={pauseAudio} variant="outline" size="sm">
-                <Pause className="w-4 h-4 mr-2" />
-                Pause
-              </Button>
-              <Button onClick={downloadPodcast} variant="outline" size="sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download Script
-              </Button>
+        {generatedSegments.length > 0 && (
+          <div className="w-full space-y-6 mt-8">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-bold">Generated Podcast</h3>
+              <div className="flex space-x-2">
+                <Button onClick={playAll} variant="outline" size="sm">
+                  {currentlyPlaying !== null ? 'Pause All' : 'Play All'}
+                </Button>
+                <Button onClick={downloadScript} variant="outline" size="sm">
+                  Download Script
+                </Button>
+                <Button 
+                  onClick={savePodcastToLibrary} 
+                  variant="default" 
+                  size="sm"
+                  disabled={isSaving}
+                >
+                  {isSaving ? 'Saving...' : 'Save Podcast'}
+                </Button>
+              </div>
             </div>
 
-            <div className="space-y-3">
-              <h3 className="font-semibold">Podcast Segments ({podcastData.totalSegments})</h3>
-              <div className="max-h-96 overflow-y-auto space-y-2">
-                {podcastData.audioSegments.map((segment, index) => (
-                  <div 
-                    key={index} 
-                    className={`p-3 rounded-lg border ${
-                      playingSegment === index ? 'bg-blue-50 border-blue-200' : 'bg-gray-50'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="font-medium text-sm text-blue-600 mb-1">
-                          {segment.speaker}
-                        </div>
-                        <div className="text-sm text-gray-700">
-                          {segment.text}
-                        </div>
-                      </div>
-                      <div className="ml-3 flex items-center gap-2">
-                        {segment.audioBase64 ? (
-                          <Button
-                            onClick={() => 
-                              playingSegment === index 
-                                ? pauseAudio() 
-                                : playAudioSegment(index)
-                            }
-                            variant="ghost"
-                            size="sm"
-                          >
-                            {playingSegment === index ? (
-                              <Pause className="w-4 h-4" />
-                            ) : (
-                              <Play className="w-4 h-4" />
-                            )}
-                          </Button>
-                        ) : (
-                          <div className="text-xs text-red-500">
-                            Audio failed
-                          </div>
-                        )}
-                      </div>
-                    </div>
+            <div className="space-y-4">
+              {generatedSegments.map((segment, index) => (
+                <div key={index} className="p-4 border rounded-lg bg-background/50 dark:bg-gray-800/50">
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="font-semibold">{segment.personality}</h4>
+                    <Button
+                      onClick={() => playSegment(index)}
+                      variant="ghost"
+                      size="sm"
+                      className="text-primary"
+                    >
+                      {currentlyPlaying === index ? 'Pause' : 'Play'}
+                    </Button>
                   </div>
-                ))}
-              </div>
+                  <p className="text-sm text-muted-foreground">{segment.text}</p>
+                  <audio
+                    ref={(el) => { audioRefs.current[index] = el; }}
+                    src={segment.audioUrl}
+                    onEnded={() => setCurrentlyPlaying(null)}
+                    className="hidden"
+                  />
+                </div>
+              ))}
             </div>
 
-            <div className="mt-4">
-              <h3 className="font-semibold mb-2">Full Script</h3>
-              <div className="p-3 h-48 overflow-y-auto bg-muted rounded-md text-sm text-muted-foreground whitespace-pre-wrap">
-                {podcastData.script}
-              </div>
+            <div className="mt-6 p-4 border rounded-lg bg-background/50 dark:bg-gray-800/50">
+              <h3 className="text-lg font-semibold mb-2">Full Script</h3>
+              <pre className="whitespace-pre-wrap text-sm text-muted-foreground p-4 bg-muted rounded-md overflow-auto max-h-[300px]">
+                {fullScript}
+              </pre>
             </div>
           </div>
         )}
-      </CardContent>
+      </CardFooter>
     </Card>
   );
 }
