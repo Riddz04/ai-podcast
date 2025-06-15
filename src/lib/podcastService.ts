@@ -26,16 +26,16 @@ export const savePodcast = async (podcastData: PodcastData, audioBase64?: string
     const docRef = await addDoc(collection(db, "podcasts"), podcastWithTimestamp);
     
     // If audio data is provided, save it to Storage
-    if (audioBase64) {
-      const storageRef = ref(storage, `podcasts/${podcastData.userId}/${docRef.id}`);
-      await uploadString(storageRef, audioBase64, 'data_url');
-      const audioUrl = await getDownloadURL(storageRef);
+    // if (audioBase64) {
+    //   const storageRef = ref(storage, `podcasts/${podcastData.userId}/${docRef.id}`);
+    //   await uploadString(storageRef, audioBase64, 'data_url');
+    //   const audioUrl = await getDownloadURL(storageRef);
       
-      // Update the document with the audio URL
-      await updateDoc(doc(db, "podcasts", docRef.id), {
-        audioUrl
-      });
-    }
+    //   // Update the document with the audio URL
+    //   await updateDoc(doc(db, "podcasts", docRef.id), {
+    //     audioUrl
+    //   });
+    // }
 
     return docRef.id;
   } catch (error) {
@@ -49,7 +49,6 @@ export const getUserPodcasts = async (userId: string): Promise<PodcastData[]> =>
     const q = query(
       collection(db, "podcasts"),
       where("userId", "==", userId),
-      orderBy("createdAt", "desc")
     );
 
     const querySnapshot = await getDocs(q);
