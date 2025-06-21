@@ -1,6 +1,7 @@
 # AI‑Podcast 🎙️
 
 A Next.js‑based AI‑powered podcast builder that generates podcast episodes from given prompts using Novita and ElevenLabs APIs.
+🌐 **Live Demo**: [pod-ai](https://pod-ai-52ct.vercel.app/)
 
 ---
 
@@ -18,8 +19,8 @@ A Next.js‑based AI‑powered podcast builder that generates podcast episodes f
 - **Next.js** (TypeScript) – UI, page routing  
 - **React** – form handling, audio player  
 - **OpenAI API** – chat prompts & responses  
-- **Any TTS provider** – to convert script to audio (customize in code)  
-- **Tailwind CSS** – styling (if present)  
+- **ElevenLabs API** – to convert script to audio
+- **Tailwind CSS** – styling
 - **Vercel** for deployment
 
 ---
