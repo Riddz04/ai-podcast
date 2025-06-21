@@ -1,6 +1,6 @@
 # AI‑Podcast 🎙️
 
-A Next.js‑based AI‑powered podcast builder that generates podcast episodes from given prompts, powered by OpenAI and TTS.
+A Next.js‑based AI‑powered podcast builder that generates podcast episodes from given prompts using Novita, Elevenlabs and Together APIs.
 
 ---
 
