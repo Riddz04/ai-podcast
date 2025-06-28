@@ -60,8 +60,19 @@ export default function Dashboard() {
   const handlePlayPause = (podcastId: string) => {
     const audioElement = document.getElementById(`audio-${podcastId}`) as HTMLAudioElement;
     
+    if (!audioElement) {
+      console.error('Audio element not found for podcast:', podcastId);
+      return;
+    }
+
+    // Check if audio source is valid
+    if (!audioElement.src || audioElement.src === window.location.href) {
+      console.error('Invalid audio source for podcast:', podcastId);
+      return;
+    }
+    
     if (currentlyPlaying === podcastId) {
-      audioElement?.pause();
+      audioElement.pause();
       setCurrentlyPlaying(null);
     } else {
       // Pause any currently playing audio
@@ -70,7 +81,10 @@ export default function Dashboard() {
         currentAudio?.pause();
       }
       
-      audioElement?.play();
+      // Play the selected audio
+      audioElement.play().catch(error => {
+        console.error('Error playing audio:', error);
+      });
       setCurrentlyPlaying(podcastId);
     }
   };
@@ -79,18 +93,30 @@ export default function Dashboard() {
     setCurrentlyPlaying(null);
   };
 
+  const handleAudioError = (podcastId: string) => {
+    console.error('Audio error for podcast:', podcastId);
+    setCurrentlyPlaying(null);
+  };
+
   const toggleScript = (podcastId: string) => {
     setExpandedScript(expandedScript === podcastId ? null : podcastId);
   };
 
   const downloadAudio = (audioUrl: string, title: string) => {
-    const link = document.createElement('a');
-    link.href = audioUrl;
-    link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      // Create a temporary link element
+      const link = document.createElement('a');
+      link.href = audioUrl;
+      link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
+      link.target = '_blank';
+      
+      // Append to body, click, and remove
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (error) {
+      console.error('Error downloading audio:', error);
+    }
   };
 
   // Don't render anything until mounted
@@ -299,13 +325,19 @@ export default function Dashboard() {
                               </div>
                               <audio
                                 id={`audio-${podcast.id}`}
-                                src={podcast.audioUrl}
                                 controls
                                 className="w-full"
                                 onEnded={handleAudioEnded}
+                                onError={() => handleAudioError(podcast.id!)}
                                 onPause={() => setCurrentlyPlaying(null)}
                                 onPlay={() => setCurrentlyPlaying(podcast.id!)}
-                              />
+                                preload="metadata"
+                              >
+                                <source src={podcast.audioUrl} type="audio/mpeg" />
+                                <source src={podcast.audioUrl} type="audio/wav" />
+                                <source src={podcast.audioUrl} type="audio/mp3" />
+                                Your browser does not support the audio element.
+                              </audio>
                             </div>
                           ) : (
                             <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
