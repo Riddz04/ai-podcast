@@ -44,7 +44,6 @@ export default function DialogueScriptForm() {
   const [fullScript, setFullScript] = useState('');
   const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [mergedAudioUrl, setMergedAudioUrl] = useState<string | null>(null);
   const audioRefs = useRef<(HTMLAudioElement | null)[]>([]);
 
   const handleTopicChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -75,129 +74,6 @@ export default function DialogueScriptForm() {
     }
   };
 
-  // Function to merge audio segments into a single audio file
-  const mergeAudioSegments = async (segments: PodcastSegment[]): Promise<string | null> => {
-    try {
-      // Filter segments that have audio
-      const segmentsWithAudio = segments.filter(segment => segment.audioUrl && !segment.audioUrl.includes('null'));
-      
-      if (segmentsWithAudio.length === 0) {
-        console.log('No audio segments to merge');
-        return null;
-      }
-
-      // If only one segment, return it directly
-      if (segmentsWithAudio.length === 1) {
-        return segmentsWithAudio[0].audioUrl;
-      }
-
-      // Create audio context for merging
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const audioBuffers: AudioBuffer[] = [];
-
-      // Convert each audio segment to AudioBuffer
-      for (const segment of segmentsWithAudio) {
-        try {
-          const response = await fetch(segment.audioUrl);
-          const arrayBuffer = await response.arrayBuffer();
-          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-          audioBuffers.push(audioBuffer);
-        } catch (error) {
-          console.error('Error processing audio segment:', error);
-        }
-      }
-
-      if (audioBuffers.length === 0) {
-        return null;
-      }
-
-      // Calculate total length
-      const totalLength = audioBuffers.reduce((sum, buffer) => sum + buffer.length, 0);
-      
-      // Create merged buffer
-      const mergedBuffer = audioContext.createBuffer(
-        audioBuffers[0].numberOfChannels,
-        totalLength,
-        audioBuffers[0].sampleRate
-      );
-
-      // Copy all audio data to merged buffer
-      let offset = 0;
-      for (const buffer of audioBuffers) {
-        for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-          mergedBuffer.getChannelData(channel).set(buffer.getChannelData(channel), offset);
-        }
-        offset += buffer.length;
-      }
-
-      // Convert merged buffer to WAV blob
-      const wavBlob = await audioBufferToWav(mergedBuffer);
-      
-      // Convert blob to base64 data URL
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(wavBlob);
-      });
-
-    } catch (error) {
-      console.error('Error merging audio segments:', error);
-      return null;
-    }
-  };
-
-  // Helper function to convert AudioBuffer to WAV blob
-  const audioBufferToWav = (buffer: AudioBuffer): Promise<Blob> => {
-    return new Promise((resolve) => {
-      const numberOfChannels = buffer.numberOfChannels;
-      const sampleRate = buffer.sampleRate;
-      const format = 1; // PCM
-      const bitDepth = 16;
-
-      const bytesPerSample = bitDepth / 8;
-      const blockAlign = numberOfChannels * bytesPerSample;
-      const byteRate = sampleRate * blockAlign;
-      const dataSize = buffer.length * blockAlign;
-      const bufferSize = 44 + dataSize;
-
-      const arrayBuffer = new ArrayBuffer(bufferSize);
-      const view = new DataView(arrayBuffer);
-
-      // WAV header
-      const writeString = (offset: number, string: string) => {
-        for (let i = 0; i < string.length; i++) {
-          view.setUint8(offset + i, string.charCodeAt(i));
-        }
-      };
-
-      writeString(0, 'RIFF');
-      view.setUint32(4, bufferSize - 8, true);
-      writeString(8, 'WAVE');
-      writeString(12, 'fmt ');
-      view.setUint32(16, 16, true);
-      view.setUint16(20, format, true);
-      view.setUint16(22, numberOfChannels, true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, byteRate, true);
-      view.setUint16(32, blockAlign, true);
-      view.setUint16(34, bitDepth, true);
-      writeString(36, 'data');
-      view.setUint32(40, dataSize, true);
-
-      // Convert float samples to 16-bit PCM
-      let offset = 44;
-      for (let i = 0; i < buffer.length; i++) {
-        for (let channel = 0; channel < numberOfChannels; channel++) {
-          const sample = Math.max(-1, Math.min(1, buffer.getChannelData(channel)[i]));
-          view.setInt16(offset, sample * 0x7FFF, true);
-          offset += 2;
-        }
-      }
-
-      resolve(new Blob([arrayBuffer], { type: 'audio/wav' }));
-    });
-  };
-
   const generatePodcast = async () => {
     if (!topic || personalities.some(p => !p.name || !p.voice)) {
       toast({
@@ -211,7 +87,6 @@ export default function DialogueScriptForm() {
     setIsGenerating(true);
     setGeneratedSegments([]);
     setFullScript('');
-    setMergedAudioUrl(null);
 
     try {
       // Map the first two personalities to the API format
@@ -263,10 +138,6 @@ export default function DialogueScriptForm() {
       
       setGeneratedSegments(segments);
       setFullScript(data.script);
-
-      // Merge audio segments
-      const mergedAudio = await mergeAudioSegments(segments);
-      setMergedAudioUrl(mergedAudio);
       
     } catch (error) {
       console.error('Error generating podcast:', error);
@@ -362,26 +233,24 @@ export default function DialogueScriptForm() {
       return;
     }
 
-    // Use merged audio if available, otherwise use first segment with audio
-    let audioToSave = mergedAudioUrl;
-    if (!audioToSave) {
-      const segmentWithAudio = generatedSegments.find(segment => segment.audioUrl !== null);
-      audioToSave = segmentWithAudio?.audioUrl || null;
-    }
-
-    if (!audioToSave) {
-      toast({
-        title: "Cannot Save",
-        description: "No audio segments are available. API quota may be exceeded.",
-        variant: "destructive"
-      });
-      return;
-    }
-
     setIsSaving(true);
     try {
+      // Find the first segment with audio to use as the podcast audio
+      const segmentWithAudio = generatedSegments.find(segment => 
+        segment.audioUrl && segment.audioUrl !== null && !segment.error
+      );
+
+      if (!segmentWithAudio) {
+        toast({
+          title: "Cannot Save",
+          description: "No audio segments are available. API quota may be exceeded.",
+          variant: "destructive"
+        });
+        return;
+      }
+
       // Convert the audio URL to a blob
-      const response = await fetch(audioToSave);
+      const response = await fetch(segmentWithAudio.audioUrl);
       const audioBlob = await response.blob();
       
       // Convert the audio blob to a base64 string
@@ -543,18 +412,6 @@ export default function DialogueScriptForm() {
                 </Button>
               </div>
             </div>
-
-            {/* Merged Audio Player */}
-            {mergedAudioUrl && (
-              <div className="p-4 border rounded-lg bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20">
-                <h4 className="font-semibold mb-2 text-green-800 dark:text-green-200">Complete Podcast Audio</h4>
-                <audio controls className="w-full">
-                  <source src={mergedAudioUrl} type="audio/wav" />
-                  <source src={mergedAudioUrl} type="audio/mpeg" />
-                  Your browser does not support the audio element.
-                </audio>
-              </div>
-            )}
 
             <div className="space-y-4">
               {generatedSegments.map((segment, index) => (
