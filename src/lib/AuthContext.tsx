@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { auth, googleProvider } from "@/lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
-import { useToast } from "@/components/ui/use-toast";
+import { toast } from "@/components/ui/use-toast";
 
 interface AuthContextType {
   user: User | null;
@@ -16,38 +16,72 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const { toast } = useToast();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setUser(user);
-      setLoading(false);
+      try {
+        setUser(user);
+      } catch (error) {
+        console.error('Auth state change error:', error);
+      } finally {
+        setLoading(false);
+      }
     });
+    
     return () => unsubscribe();
   }, []);
 
   const loginWithGoogle = async () => {
     try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error: any) {
-      if (error.code === 'auth/popup-blocked') {
+      setLoading(true);
+      const result = await signInWithPopup(auth, googleProvider);
+      
+      if (result.user) {
         toast({
-          title: "Popup Blocked",
-          description: "Please disable your browser's popup blocker for this site to allow Google login to work properly.",
-          variant: "destructive",
-        });
-      } else {
-        toast({
-          title: "Login Error",
-          description: "An error occurred during login. Please try again.",
-          variant: "destructive",
+          title: "Login Successful",
+          description: `Welcome, ${result.user.displayName || result.user.email}!`,
         });
       }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      
+      let errorMessage = "An error occurred during login. Please try again.";
+      
+      if (error.code === 'auth/popup-blocked') {
+        errorMessage = "Please disable your browser's popup blocker for this site to allow Google login to work properly.";
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        errorMessage = "Login was cancelled. Please try again.";
+      } else if (error.code === 'auth/network-request-failed') {
+        errorMessage = "Network error. Please check your internet connection and try again.";
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = "Too many login attempts. Please wait a moment and try again.";
+      }
+      
+      toast({
+        title: "Login Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      await signOut(auth);
+      toast({
+        title: "Logged Out",
+        description: "You have been successfully logged out.",
+      });
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast({
+        title: "Logout Error",
+        description: "An error occurred during logout. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
@@ -59,6 +93,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (!context) throw new Error("useAuth must be used within AuthProvider");
+  if (!context) {
+    throw new Error("useAuth must be used within AuthProvider");
+  }
   return context;
-}
+};

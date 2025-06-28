@@ -53,14 +53,7 @@ interface AudioSegment extends ScriptSegment {
 
 export const POST = async (req: NextRequest): Promise<NextResponse> => {
   try {
-    const { 
-      personality1, 
-      personality2, 
-      podcastTopic, 
-      voice1Type = "male_confident", 
-      voice2Type = "female_clear" 
-    } = await req.json() as PodcastRequestBody;
-    
+    // Validate environment variables
     if (!process.env.NOVITA_API_KEY) {
       console.error('NOVITA_API_KEY is not configured.');
       return NextResponse.json(
@@ -76,6 +69,25 @@ export const POST = async (req: NextRequest): Promise<NextResponse> => {
         { status: 500 }
       );
     }
+
+    // Parse and validate request body
+    let requestBody: PodcastRequestBody;
+    try {
+      requestBody = await req.json();
+    } catch (error) {
+      return NextResponse.json(
+        { error: "Invalid JSON in request body" }, 
+        { status: 400 }
+      );
+    }
+
+    const { 
+      personality1, 
+      personality2, 
+      podcastTopic, 
+      voice1Type = "male_confident", 
+      voice2Type = "female_clear" 
+    } = requestBody;
 
     if (!personality1 || !personality2 || !podcastTopic) {
       return NextResponse.json(
@@ -116,7 +128,8 @@ export const POST = async (req: NextRequest): Promise<NextResponse> => {
 };
 
 async function generateScript(personality1: string, personality2: string, podcastTopic: string): Promise<string> {
-  const prompt = `Create a short realistic podcast conversation between ${personality1} and ${personality2} about "${podcastTopic}". 
+  try {
+    const prompt = `Create a short realistic podcast conversation between ${personality1} and ${personality2} about "${podcastTopic}". 
 
 Format the script exactly like this:
 [SPEAKER: ${personality1}]: [Their dialogue here]
@@ -140,18 +153,30 @@ Example format:
 
 Start the conversation now:`;
 
-  const completion = await openai.chat.completions.create({
-    messages: [{ role: "user", content: prompt }],
-    model: "google/gemma-3-27b-it",
-    stream: false,
-    response_format: { type: "text" }
-  });
-   console.log("Generated script:", completion.choices[0]?.message?.content);
-  return completion.choices[0]?.message?.content || "No script generated";
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "google/gemma-3-27b-it",
+      stream: false,
+      response_format: { type: "text" },
+      max_tokens: 1000,
+      temperature: 0.7
+    });
+
+    const generatedScript = completion.choices[0]?.message?.content;
+    if (!generatedScript) {
+      throw new Error("No script generated from AI");
+    }
+
+    console.log("Generated script:", generatedScript);
+    return generatedScript;
+  } catch (error) {
+    console.error('Error generating script:', error);
+    throw new Error(`Failed to generate script: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 function parseScript(script: string, personality1: string, personality2: string): ScriptSegment[] {
-  const segments = [];
+  const segments: ScriptSegment[] = [];
   const lines = script.split('\n').filter(line => line.trim());
   
   for (const line of lines) {
@@ -161,7 +186,7 @@ function parseScript(script: string, personality1: string, personality2: string)
       const text = match[2].trim();
       
       // Clean up text - remove extra quotation marks, etc.
-      const cleanText = text.replace(/^["']|["']$/g, '');
+      const cleanText = text.replace(/^["']|["']$/g, '').trim();
       
       if (cleanText.length > 0) {
         segments.push({
@@ -171,6 +196,23 @@ function parseScript(script: string, personality1: string, personality2: string)
         });
       }
     }
+  }
+  
+  if (segments.length === 0) {
+    console.warn('No segments parsed from script, creating fallback segments');
+    // Create fallback segments if parsing fails
+    segments.push(
+      {
+        speaker: personality1,
+        text: `Welcome to our discussion about ${script.substring(0, 100)}...`,
+        isPersonality1: true
+      },
+      {
+        speaker: personality2,
+        text: "Thank you for having me. This is indeed an interesting topic.",
+        isPersonality1: false
+      }
+    );
   }
   
   return segments;
@@ -247,7 +289,6 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
 async function generateFallbackAudio(text: string): Promise<string | null> {
   try {
     // Create a simple audio tone as fallback
-    // This creates a very basic beep sound encoded as base64
     const sampleRate = 22050;
     const duration = Math.min(text.length / 10, 5); // Max 5 seconds
     const samples = Math.floor(sampleRate * duration);
@@ -309,30 +350,57 @@ async function generateFallbackAudio(text: string): Promise<string | null> {
 }
 
 async function generateSingleAudio(text: string, voiceId: string): Promise<string> {
-  const response = await fetch(`${ELEVENLABS_BASE_URL}/text-to-speech/${voiceId}`, {
-    method: 'POST',
-    headers: {
-      'Accept': 'audio/mpeg',
-      'Content-Type': 'application/json',
-      'xi-api-key': ELEVENLABS_API_KEY
-    },
-    body: JSON.stringify({
-      text: text,
-      model_id: "eleven_monolingual_v1",
-      voice_settings: {
-        stability: 0.6,
-        similarity_boost: 0.8,
-        style: 0.4,
-        use_speaker_boost: true
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+  if (!text || text.trim() === '') {
+    throw new Error('Empty text provided for audio generation');
   }
 
-  const audioBuffer = await response.arrayBuffer();
-  return Buffer.from(audioBuffer).toString('base64');
+  if (!voiceId) {
+    throw new Error('No voice ID provided for audio generation');
+  }
+
+  try {
+    const response = await fetch(`${ELEVENLABS_BASE_URL}/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.6,
+          similarity_boost: 0.8,
+          style: 0.4,
+          use_speaker_boost: true
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('ElevenLabs API error response:', errorText);
+      
+      if (response.status === 429) {
+        throw new Error('quota_exceeded: ElevenLabs API quota exceeded');
+      } else if (response.status === 401) {
+        throw new Error('ElevenLabs API authentication failed');
+      } else if (response.status === 422) {
+        throw new Error('ElevenLabs API validation error: Invalid voice ID or text');
+      } else {
+        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+      }
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    if (audioBuffer.byteLength === 0) {
+      throw new Error('Empty audio response from ElevenLabs API');
+    }
+
+    return Buffer.from(audioBuffer).toString('base64');
+  } catch (error) {
+    console.error('Error in generateSingleAudio:', error);
+    throw error;
+  }
 }
