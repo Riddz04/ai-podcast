@@ -234,7 +234,7 @@ export default function DialogueScriptForm() {
         : topic;
       
       const podcastId = await savePodcast({
-        userId: user.uid,
+        userId: user.id,
         title: podcastTitle,
         personality1: personalities[0]?.name || 'Speaker 1',
         personality2: personalities[1]?.name || 'Speaker 2',

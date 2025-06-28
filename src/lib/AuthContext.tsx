@@ -1,11 +1,12 @@
 'use client'
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { auth, googleProvider } from "@/lib/firebase";
-import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
+import { supabase } from "@/lib/supabase";
+import { User, Session, AuthError } from "@supabase/supabase-js";
 import { toast } from "@/components/ui/use-toast";
 
 interface AuthContextType {
   user: User | null;
+  session: Session | null;
   loading: boolean;
   loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
@@ -15,46 +16,79 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    // Get initial session
+    const getInitialSession = async () => {
       try {
-        setUser(user);
+        const { data: { session }, error } = await supabase.auth.getSession();
+        if (error) {
+          console.error('Error getting session:', error);
+        } else {
+          setSession(session);
+          setUser(session?.user ?? null);
+        }
       } catch (error) {
-        console.error('Auth state change error:', error);
+        console.error('Auth initialization error:', error);
       } finally {
         setLoading(false);
       }
-    });
-    
-    return () => unsubscribe();
+    };
+
+    getInitialSession();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth state changed:', event, session?.user?.email);
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      }
+    );
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const loginWithGoogle = async () => {
     try {
       setLoading(true);
-      const result = await signInWithPopup(auth, googleProvider);
       
-      if (result.user) {
-        toast({
-          title: "Login Successful",
-          description: `Welcome, ${result.user.displayName || result.user.email}!`,
-        });
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/dashboard`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        }
+      });
+
+      if (error) {
+        throw error;
       }
+
+      // Note: The actual sign-in happens via redirect, so we won't reach here immediately
+      // The success toast will be shown after redirect in the dashboard
+      
     } catch (error: any) {
       console.error('Login error:', error);
       
       let errorMessage = "An error occurred during login. Please try again.";
       
-      if (error.code === 'auth/popup-blocked') {
+      if (error.message?.includes('popup')) {
         errorMessage = "Please disable your browser's popup blocker for this site to allow Google login to work properly.";
-      } else if (error.code === 'auth/popup-closed-by-user') {
+      } else if (error.message?.includes('cancelled')) {
         errorMessage = "Login was cancelled. Please try again.";
-      } else if (error.code === 'auth/network-request-failed') {
+      } else if (error.message?.includes('network')) {
         errorMessage = "Network error. Please check your internet connection and try again.";
-      } else if (error.code === 'auth/too-many-requests') {
+      } else if (error.message?.includes('rate')) {
         errorMessage = "Too many login attempts. Please wait a moment and try again.";
+      } else if (error.message) {
+        errorMessage = error.message;
       }
       
       toast({
@@ -69,23 +103,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const logout = async () => {
     try {
-      await signOut(auth);
+      const { error } = await supabase.auth.signOut();
+      
+      if (error) {
+        throw error;
+      }
+      
       toast({
         title: "Logged Out",
         description: "You have been successfully logged out.",
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Logout error:', error);
       toast({
         title: "Logout Error",
-        description: "An error occurred during logout. Please try again.",
+        description: error.message || "An error occurred during logout. Please try again.",
         variant: "destructive",
       });
     }
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithGoogle, logout }}>
+    <AuthContext.Provider value={{ user, session, loading, loginWithGoogle, logout }}>
       {children}
     </AuthContext.Provider>
   );

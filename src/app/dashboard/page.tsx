@@ -36,7 +36,7 @@ export default function Dashboard() {
     const fetchPodcasts = async () => {
       try {
         setLoading(true);
-        const userPodcasts = await getUserPodcasts(user.uid);
+        const userPodcasts = await getUserPodcasts(user.id);
         setPodcasts(userPodcasts);
       } catch (error) {
         console.error("Error fetching podcasts:", error);
@@ -71,7 +71,7 @@ export default function Dashboard() {
     setDeletingPodcast(podcastId);
     
     try {
-      await deletePodcast(podcastId, user.uid);
+      await deletePodcast(podcastId, user.id);
       
       // Remove from local state
       setPodcasts(prevPodcasts => prevPodcasts.filter(podcast => podcast.id !== podcastId));
@@ -150,15 +150,15 @@ export default function Dashboard() {
           
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-3 bg-white dark:bg-gray-800 p-2 rounded-full shadow-sm">
-              {user.photoURL && (
+              {user.user_metadata?.avatar_url && (
                 <img 
-                  src={user.photoURL} 
-                  alt={user.displayName || "User"} 
+                  src={user.user_metadata.avatar_url} 
+                  alt={user.user_metadata?.full_name || user.email || "User"} 
                   className="w-8 h-8 rounded-full"
                 />
               )}
               <span className="text-sm font-medium text-gray-700 dark:text-gray-300 mr-2">
-                {user.displayName || user.email}
+                {user.user_metadata?.full_name || user.email}
               </span>
             </div>
             <Button onClick={logout} variant="outline" size="sm">
