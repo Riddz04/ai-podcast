@@ -21,8 +21,8 @@ const getSupabaseAdmin = () => {
 // GET /api/podcasts?userId=xxx - Get user's podcasts
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
+    const url = new URL(request.url);
+    const userId = url.searchParams.get('userId');
 
     if (!userId) {
       return NextResponse.json(

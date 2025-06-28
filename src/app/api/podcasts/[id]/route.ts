@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { use } from 'react';
 
 // Server-side Supabase client with service role key
 const getSupabaseAdmin = () => {
@@ -26,8 +25,8 @@ export async function DELETE(
 ) {
   try {
     const params = await context.params;
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
+    const url = new URL(request.url);
+    const userId = url.searchParams.get('userId');
     const podcastId = params.id;
 
     if (!userId) {

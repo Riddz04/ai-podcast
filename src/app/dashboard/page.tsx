@@ -2,7 +2,7 @@
 import { useAuth } from "@/lib/AuthContext";
 import DialogueScriptForm from "@/components/DialogueScriptForm";
 import { FinalizePodcastForm } from "@/components/FinalizePodcastForm";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getUserPodcasts, deletePodcast, PodcastData } from "@/lib/podcastService";
@@ -17,6 +17,7 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
   const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [expandedScript, setExpandedScript] = useState<string | null>(null);
+  const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -78,7 +79,7 @@ export default function Dashboard() {
         return;
       }
 
-      const audioElement = document.getElementById(`audio-${podcastId}`) as HTMLAudioElement;
+      const audioElement = audioRefs.current[podcastId];
       
       if (!audioElement) {
         console.error('Audio element not found for podcast:', podcastId);
@@ -90,16 +91,22 @@ export default function Dashboard() {
         setCurrentlyPlaying(null);
       } else {
         // Pause any currently playing audio
-        if (currentlyPlaying) {
-          const currentAudio = document.getElementById(`audio-${currentlyPlaying}`) as HTMLAudioElement;
-          currentAudio?.pause();
+        if (currentlyPlaying && audioRefs.current[currentlyPlaying]) {
+          audioRefs.current[currentlyPlaying]?.pause();
         }
         
         // Play the selected audio
-        audioElement.play().catch(error => {
-          console.error('Error playing audio:', error);
-        });
-        setCurrentlyPlaying(podcastId);
+        const playPromise = audioElement.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setCurrentlyPlaying(podcastId);
+            })
+            .catch(error => {
+              console.error('Error playing audio:', error);
+              setCurrentlyPlaying(null);
+            });
+        }
       }
     } catch (error) {
       console.error('Error in handlePlayPause:', error);
@@ -298,7 +305,7 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-6">
                     {podcasts.map((podcast) => (
-                      <Card key={podcast.id} className="overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200 dark:border-gray-700">
+                      <Card key={podcast.id} id={podcast.id} className="overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200 dark:border-gray-700">
                         <CardHeader className="pb-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700">
                           <div className="flex justify-between items-start">
                             <div className="flex-1">
@@ -352,7 +359,7 @@ export default function Dashboard() {
                                 </Button>
                               </div>
                               <audio
-                                id={`audio-${podcast.id}`}
+                                ref={(el) => { audioRefs.current[podcast.id!] = el; }}
                                 controls
                                 className="w-full"
                                 onEnded={handleAudioEnded}
