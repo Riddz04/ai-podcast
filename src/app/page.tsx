@@ -16,6 +16,11 @@ export default function Home() {
     }
   }, [user, router]);
 
+  // Don't render anything while checking auth state
+  if (user) {
+    return null;
+  }
+
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-indigo-950 p-4">
       <div className="max-w-3xl w-full text-center space-y-8">

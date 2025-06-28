@@ -14,9 +14,16 @@ export default function Dashboard() {
   const { user, logout } = useAuth();
   const [podcasts, setPodcasts] = useState<PodcastData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
+    
     if (!user) {
       router.push('/');
       return;
@@ -35,7 +42,7 @@ export default function Dashboard() {
     };
 
     fetchPodcasts();
-  }, [user, router]);
+  }, [user, router, mounted]);
 
   const handleDeletePodcast = async (podcastId: string) => {
     if (!user) return;
@@ -47,6 +54,11 @@ export default function Dashboard() {
       console.error("Error deleting podcast:", error);
     }
   };
+
+  // Don't render anything until mounted
+  if (!mounted) {
+    return null;
+  }
 
   if (!user) {
     return (
