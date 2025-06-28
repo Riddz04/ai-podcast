@@ -29,6 +29,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } else {
           setSession(session);
           setUser(session?.user ?? null);
+          
+          // Show welcome message if user just logged in
+          if (session?.user && !user) {
+            toast({
+              title: "Login Successful",
+              description: `Welcome, ${session.user.user_metadata?.full_name || session.user.email}!`,
+            });
+          }
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
@@ -46,6 +54,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+
+        // Handle different auth events
+        if (event === 'SIGNED_IN' && session?.user) {
+          toast({
+            title: "Login Successful",
+            description: `Welcome, ${session.user.user_metadata?.full_name || session.user.email}!`,
+          });
+        } else if (event === 'SIGNED_OUT') {
+          toast({
+            title: "Logged Out",
+            description: "You have been successfully logged out.",
+          });
+        } else if (event === 'TOKEN_REFRESHED') {
+          console.log('Token refreshed successfully');
+        }
       }
     );
 
@@ -56,10 +79,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       setLoading(true);
       
+      // Check if we're in development or production
+      const isDevelopment = window.location.hostname === 'localhost';
+      const redirectTo = isDevelopment 
+        ? `${window.location.origin}/dashboard`
+        : `${window.location.origin}/dashboard`;
+
+      console.log('Attempting Google login with redirect to:', redirectTo);
+      
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/dashboard`,
+          redirectTo: redirectTo,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -68,25 +99,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       });
 
       if (error) {
+        console.error('Supabase auth error:', error);
         throw error;
       }
 
+      console.log('OAuth initiated successfully:', data);
+      
       // Note: The actual sign-in happens via redirect, so we won't reach here immediately
-      // The success toast will be shown after redirect in the dashboard
+      // The success toast will be shown after redirect in the auth state change handler
       
     } catch (error: any) {
       console.error('Login error:', error);
       
       let errorMessage = "An error occurred during login. Please try again.";
       
-      if (error.message?.includes('popup')) {
-        errorMessage = "Please disable your browser's popup blocker for this site to allow Google login to work properly.";
-      } else if (error.message?.includes('cancelled')) {
-        errorMessage = "Login was cancelled. Please try again.";
-      } else if (error.message?.includes('network')) {
-        errorMessage = "Network error. Please check your internet connection and try again.";
-      } else if (error.message?.includes('rate')) {
+      // Handle specific Supabase auth errors
+      if (error.message?.includes('Invalid login credentials')) {
+        errorMessage = "Invalid login credentials. Please try again.";
+      } else if (error.message?.includes('Email not confirmed')) {
+        errorMessage = "Please check your email and confirm your account before logging in.";
+      } else if (error.message?.includes('Too many requests')) {
         errorMessage = "Too many login attempts. Please wait a moment and try again.";
+      } else if (error.message?.includes('Provider not found')) {
+        errorMessage = "Google authentication is not properly configured. Please contact support.";
+      } else if (error.message?.includes('redirect_uri_mismatch')) {
+        errorMessage = "Authentication redirect URL mismatch. Please contact support.";
+      } else if (error.message?.includes('popup')) {
+        errorMessage = "Please disable your browser's popup blocker for this site.";
+      } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
+        errorMessage = "Network error. Please check your internet connection and try again.";
       } else if (error.message) {
         errorMessage = error.message;
       }
@@ -109,10 +150,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         throw error;
       }
       
-      toast({
-        title: "Logged Out",
-        description: "You have been successfully logged out.",
-      });
+      // Clear local state immediately
+      setUser(null);
+      setSession(null);
+      
+      // Don't show toast here as it will be shown by the auth state change handler
+      
     } catch (error: any) {
       console.error('Logout error:', error);
       toast({

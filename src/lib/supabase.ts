@@ -6,6 +6,10 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY as string;
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Missing Supabase environment variables. Please check your .env file.');
   console.error('Required variables: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  console.error('Current values:', { 
+    supabaseUrl: supabaseUrl ? 'Set' : 'Missing', 
+    supabaseAnonKey: supabaseAnonKey ? 'Set' : 'Missing' 
+  });
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -13,6 +17,23 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    flowType: 'pkce', // Use PKCE flow for better security
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    storageKey: 'supabase.auth.token',
+    debug: process.env.NODE_ENV === 'development',
+  },
+  global: {
+    headers: {
+      'X-Client-Info': 'podcast-ai-app',
+    },
+  },
+  db: {
+    schema: 'public',
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 2,
+    },
   },
 });
 
@@ -44,6 +65,22 @@ export const checkAudioFileExists = async (filePath: string) => {
     return !error && data && data.length > 0;
   } catch (error) {
     console.error('Error checking file existence:', error);
+    return false;
+  }
+};
+
+// Helper function to test Supabase connection
+export const testSupabaseConnection = async () => {
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      console.error('Supabase connection test failed:', error);
+      return false;
+    }
+    console.log('Supabase connection test successful');
+    return true;
+  } catch (error) {
+    console.error('Supabase connection test error:', error);
     return false;
   }
 };
