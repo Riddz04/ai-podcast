@@ -47,8 +47,8 @@ interface AudioSegment extends ScriptSegment {
   segmentIndex: number;
   audioBase64: string | null;
   voiceId: string | null;
-  duration?: number; // Made optional as it's an estimate
-  error?: string;    // For segments that failed
+  duration?: number;
+  error?: string;
 }
 
 export const POST = async (req: NextRequest): Promise<NextResponse> => {
@@ -182,7 +182,7 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
   
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
-    let currentVoiceId: string | null = null; // To store the voiceId used
+    let currentVoiceId: string | null = null;
     
     try {
       // If quota already exceeded, don't attempt ElevenLabs API calls
@@ -201,11 +201,11 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
       const audioData = await generateSingleAudio(segment.text, currentVoiceId);
       
       audioSegments.push({
-        ...segment, // Spread the original segment properties
+        ...segment,
         segmentIndex: i,
         audioBase64: audioData,
         voiceId: currentVoiceId,
-        duration: Math.ceil(segment.text.length / 10) // Rough estimate: 10 chars per second
+        duration: Math.ceil(segment.text.length / 10)
       });
       
       // Add small delay to avoid rate limiting
@@ -224,8 +224,6 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
       // Generate a fallback audio or use a placeholder
       let fallbackAudio = null;
       try {
-        // Here you could implement a fallback TTS solution
-        // For now, we'll use a simple base64 placeholder
         fallbackAudio = await generateFallbackAudio(segment.text);
       } catch (fallbackError) {
         console.error('Fallback audio generation also failed:', fallbackError);
@@ -233,11 +231,11 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
       
       // Add a placeholder or fallback for failed segments
       audioSegments.push({
-        ...segment, // Spread the original segment properties
+        ...segment,
         segmentIndex: i,
         audioBase64: fallbackAudio,
         error: errorMessage,
-        voiceId: currentVoiceId // Log the voiceId that was attempted
+        voiceId: currentVoiceId
       });
     }
   }
@@ -245,21 +243,69 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
   return audioSegments;
 }
 
-// Simple fallback audio generation function
+// Enhanced fallback audio generation
 async function generateFallbackAudio(text: string): Promise<string | null> {
-  // This is a placeholder function
-  // In a real implementation, you would integrate with a free TTS service
-  // or use the Web Speech API on the client side
-  
-  // For now, return null to indicate no audio available
-  // The client can handle this by showing a message that audio is unavailable
-  console.log('Using fallback audio generation for:', text.substring(0, 30) + '...');
-  return null;
-  
-  // If you want to implement a real fallback, you could use:
-  // 1. Browser's Web Speech API (client-side)
-  // 2. A free TTS API with higher limits
-  // 3. A local TTS solution
+  try {
+    // Create a simple audio tone as fallback
+    // This creates a very basic beep sound encoded as base64
+    const sampleRate = 22050;
+    const duration = Math.min(text.length / 10, 5); // Max 5 seconds
+    const samples = Math.floor(sampleRate * duration);
+    
+    // Create a simple sine wave
+    const frequency = 440; // A4 note
+    const amplitude = 0.1;
+    
+    const audioData = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      audioData[i] = amplitude * Math.sin(2 * Math.PI * frequency * i / sampleRate);
+    }
+    
+    // Convert to WAV format (simplified)
+    const buffer = new ArrayBuffer(44 + samples * 2);
+    const view = new DataView(buffer);
+    
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples * 2, true);
+    
+    // Convert float samples to 16-bit PCM
+    let offset = 44;
+    for (let i = 0; i < samples; i++) {
+      const sample = Math.max(-1, Math.min(1, audioData[i]));
+      view.setInt16(offset, sample * 0x7FFF, true);
+      offset += 2;
+    }
+    
+    // Convert to base64
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    
+    return btoa(binary);
+  } catch (error) {
+    console.error('Error generating fallback audio:', error);
+    return null;
+  }
 }
 
 async function generateSingleAudio(text: string, voiceId: string): Promise<string> {
