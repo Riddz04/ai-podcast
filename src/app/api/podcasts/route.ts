@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { podcastData, audioBase64 } = body;
+    const { podcastData, audioSegments } = body;
 
     console.log('Saving podcast with data:', podcastData);
 
@@ -110,69 +110,86 @@ export async function POST(request: NextRequest) {
 
     console.log('Podcast inserted successfully:', podcast);
 
-    let audioUrl: string | undefined;
+    let finalAudioUrl: string | undefined;
 
-    // If audio data is provided, upload it to Supabase Storage
-    if (audioBase64 && podcast) {
+    // If audio segments are provided, combine them and upload
+    if (audioSegments && Array.isArray(audioSegments) && audioSegments.length > 0) {
       try {
-        console.log('Processing audio upload...');
+        console.log('Processing audio segments:', audioSegments.length);
         
-        // Convert base64 to blob
-        const base64Data = audioBase64.split(',')[1] || audioBase64;
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        const audioBlob = new Blob([byteArray], { type: 'audio/mpeg' });
+        // Find segments with valid audio
+        const validSegments = audioSegments.filter(segment => 
+          segment.audioBase64 && 
+          segment.audioBase64.trim() !== '' && 
+          !segment.error
+        );
 
-        console.log('Audio blob created, size:', audioBlob.size);
-
-        // Upload to Supabase Storage
-        const fileName = `${podcastData.userId}/${podcast.id}.mp3`;
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from('podcast-audio')
-          .upload(fileName, audioBlob, {
-            contentType: 'audio/mpeg',
-            upsert: true
-          });
-
-        if (uploadError) {
-          console.error('Error uploading audio:', uploadError);
-          // Don't throw here, just log the error and continue without audio
-        } else {
-          console.log('Audio uploaded successfully:', uploadData);
+        if (validSegments.length > 0) {
+          // For now, use the first valid segment as the podcast audio
+          // In the future, you could combine multiple segments
+          const firstValidSegment = validSegments[0];
           
-          // Get the public URL for the uploaded file
-          const { data: urlData } = supabase.storage
-            .from('podcast-audio')
-            .getPublicUrl(fileName);
-
-          audioUrl = urlData.publicUrl;
-          console.log('Audio URL generated:', audioUrl);
-
-          // Update the podcast record with the audio URL
-          const { error: updateError } = await supabase
-            .from('podcasts')
-            .update({ audio_url: audioUrl })
-            .eq('id', podcast.id);
-
-          if (updateError) {
-            console.error('Error updating podcast with audio URL:', updateError);
-          } else {
-            console.log('Podcast updated with audio URL');
+          // Convert base64 to blob
+          const base64Data = firstValidSegment.audioBase64.includes(',') 
+            ? firstValidSegment.audioBase64.split(',')[1] 
+            : firstValidSegment.audioBase64;
+          
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
           }
+          const byteArray = new Uint8Array(byteNumbers);
+          const audioBlob = new Blob([byteArray], { type: 'audio/mpeg' });
+
+          console.log('Audio blob created, size:', audioBlob.size);
+
+          // Upload to Supabase Storage
+          const fileName = `${podcastData.userId}/${podcast.id}.mp3`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('podcast-audio')
+            .upload(fileName, audioBlob, {
+              contentType: 'audio/mpeg',
+              upsert: true
+            });
+
+          if (uploadError) {
+            console.error('Error uploading audio:', uploadError);
+          } else {
+            console.log('Audio uploaded successfully:', uploadData);
+            
+            // Get the public URL for the uploaded file
+            const { data: urlData } = supabase.storage
+              .from('podcast-audio')
+              .getPublicUrl(fileName);
+
+            finalAudioUrl = urlData.publicUrl;
+            console.log('Audio URL generated:', finalAudioUrl);
+
+            // Update the podcast record with the audio URL
+            const { error: updateError } = await supabase
+              .from('podcasts')
+              .update({ audio_url: finalAudioUrl })
+              .eq('id', podcast.id);
+
+            if (updateError) {
+              console.error('Error updating podcast with audio URL:', updateError);
+            } else {
+              console.log('Podcast updated with audio URL');
+            }
+          }
+        } else {
+          console.log('No valid audio segments found');
         }
       } catch (audioError) {
-        console.error('Error processing audio:', audioError);
+        console.error('Error processing audio segments:', audioError);
         // Continue without audio
       }
     }
 
     return NextResponse.json({ 
       podcastId: podcast.id,
-      audioUrl 
+      audioUrl: finalAudioUrl 
     });
   } catch (error) {
     console.error('Error in POST /api/podcasts:', error);

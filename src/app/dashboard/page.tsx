@@ -46,6 +46,18 @@ export default function Dashboard() {
     fetchPodcasts();
   }, [user, router, mounted]);
 
+  const isValidAudioUrl = (url?: string): boolean => {
+    if (!url || url.trim() === '') return false;
+    if (url === window.location.href) return false;
+    
+    try {
+      // Check if it's a valid data URL or HTTP URL
+      return url.startsWith('data:audio/') || url.startsWith('http://') || url.startsWith('https://');
+    } catch {
+      return false;
+    }
+  };
+
   const handleDeletePodcast = async (podcastId: string) => {
     if (!user) return;
     
@@ -58,34 +70,39 @@ export default function Dashboard() {
   };
 
   const handlePlayPause = (podcastId: string) => {
-    const audioElement = document.getElementById(`audio-${podcastId}`) as HTMLAudioElement;
-    
-    if (!audioElement) {
-      console.error('Audio element not found for podcast:', podcastId);
-      return;
-    }
+    try {
+      const podcast = podcasts.find(p => p.id === podcastId);
+      
+      if (!podcast || !isValidAudioUrl(podcast.audioUrl)) {
+        console.error('Invalid audio source for podcast:', podcastId);
+        return;
+      }
 
-    // Check if audio source is valid
-    if (!audioElement.src || audioElement.src === window.location.href) {
-      console.error('Invalid audio source for podcast:', podcastId);
-      return;
-    }
-    
-    if (currentlyPlaying === podcastId) {
-      audioElement.pause();
-      setCurrentlyPlaying(null);
-    } else {
-      // Pause any currently playing audio
-      if (currentlyPlaying) {
-        const currentAudio = document.getElementById(`audio-${currentlyPlaying}`) as HTMLAudioElement;
-        currentAudio?.pause();
+      const audioElement = document.getElementById(`audio-${podcastId}`) as HTMLAudioElement;
+      
+      if (!audioElement) {
+        console.error('Audio element not found for podcast:', podcastId);
+        return;
       }
       
-      // Play the selected audio
-      audioElement.play().catch(error => {
-        console.error('Error playing audio:', error);
-      });
-      setCurrentlyPlaying(podcastId);
+      if (currentlyPlaying === podcastId) {
+        audioElement.pause();
+        setCurrentlyPlaying(null);
+      } else {
+        // Pause any currently playing audio
+        if (currentlyPlaying) {
+          const currentAudio = document.getElementById(`audio-${currentlyPlaying}`) as HTMLAudioElement;
+          currentAudio?.pause();
+        }
+        
+        // Play the selected audio
+        audioElement.play().catch(error => {
+          console.error('Error playing audio:', error);
+        });
+        setCurrentlyPlaying(podcastId);
+      }
+    } catch (error) {
+      console.error('Error in handlePlayPause:', error);
     }
   };
 
@@ -105,7 +122,7 @@ export default function Dashboard() {
   const downloadAudio = (audioUrl: string, title: string) => {
     try {
       // Validate the audio URL
-      if (!audioUrl || audioUrl === window.location.href) {
+      if (!isValidAudioUrl(audioUrl)) {
         console.error('Invalid audio URL for download');
         return;
       }
@@ -308,7 +325,7 @@ export default function Dashboard() {
                         
                         <CardContent className="p-6 space-y-4">
                           {/* Audio Player Section */}
-                          {podcast.audioUrl ? (
+                          {isValidAudioUrl(podcast.audioUrl) ? (
                             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
                               <div className="flex items-center justify-between mb-3">
                                 <div className="flex items-center gap-2">
@@ -409,7 +426,7 @@ export default function Dashboard() {
                           </Button>
                           
                           <div className="flex gap-2">
-                            {podcast.audioUrl && (
+                            {isValidAudioUrl(podcast.audioUrl) && (
                               <Button 
                                 variant="outline" 
                                 size="sm" 

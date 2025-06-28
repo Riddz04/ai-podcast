@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { use } from 'react';
 
 // Server-side Supabase client with service role key
 const getSupabaseAdmin = () => {
@@ -21,9 +22,10 @@ const getSupabaseAdmin = () => {
 // DELETE /api/podcasts/[id] - Delete a podcast
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const params = await context.params;
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const podcastId = params.id;

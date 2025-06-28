@@ -11,7 +11,7 @@ export interface PodcastData {
   updatedAt?: string;
 }
 
-export const savePodcast = async (podcastData: PodcastData, audioBase64?: string): Promise<string> => {
+export const savePodcast = async (podcastData: PodcastData, audioSegments?: any[]): Promise<string> => {
   try {
     console.log('Saving podcast with data:', podcastData);
 
@@ -22,7 +22,7 @@ export const savePodcast = async (podcastData: PodcastData, audioBase64?: string
       },
       body: JSON.stringify({
         podcastData,
-        audioBase64
+        audioSegments: audioSegments || []
       }),
     });
 
