@@ -2,14 +2,15 @@
 import { useAuth } from "@/lib/AuthContext";
 import DialogueScriptForm from "@/components/DialogueScriptForm";
 import { FinalizePodcastForm } from "@/components/FinalizePodcastForm";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { getUserPodcasts, deletePodcast, PodcastData } from "@/lib/podcastService";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Play, Trash2, Download, Clock, User, Calendar, Pause, FileText, Volume2 } from "lucide-react";
+import { Trash2, Clock, User, Calendar, FileText } from "lucide-react";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { toast } from "@/components/ui/use-toast";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -17,6 +18,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [expandedScript, setExpandedScript] = useState<string | null>(null);
+  const [deletingPodcast, setDeletingPodcast] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -38,6 +40,11 @@ export default function Dashboard() {
         setPodcasts(userPodcasts);
       } catch (error) {
         console.error("Error fetching podcasts:", error);
+        toast({
+          title: "Error",
+          description: "Failed to load your podcasts. Please try refreshing the page.",
+          variant: "destructive"
+        });
       } finally {
         setLoading(false);
       }
@@ -47,33 +54,47 @@ export default function Dashboard() {
   }, [user, router, mounted]);
 
   const handleDeletePodcast = async (podcastId: string) => {
-    if (!user) return;
+    if (!user || !podcastId) {
+      toast({
+        title: "Error",
+        description: "Cannot delete podcast. Please try again.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    // Confirm deletion
+    if (!window.confirm('Are you sure you want to delete this podcast? This action cannot be undone.')) {
+      return;
+    }
+
+    setDeletingPodcast(podcastId);
     
     try {
       await deletePodcast(podcastId, user.uid);
-      setPodcasts(podcasts.filter(podcast => podcast.id !== podcastId));
+      
+      // Remove from local state
+      setPodcasts(prevPodcasts => prevPodcasts.filter(podcast => podcast.id !== podcastId));
+      
+      toast({
+        title: "Success",
+        description: "Podcast deleted successfully.",
+      });
     } catch (error) {
       console.error("Error deleting podcast:", error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast({
+        title: "Delete Failed",
+        description: `Failed to delete podcast: ${errorMessage}`,
+        variant: "destructive"
+      });
+    } finally {
+      setDeletingPodcast(null);
     }
   };
 
   const toggleScript = (podcastId: string) => {
     setExpandedScript(expandedScript === podcastId ? null : podcastId);
-  };
-
-  const downloadAudio = (audioUrl: string, title: string) => {
-    try {
-      const link = document.createElement('a');
-      link.href = audioUrl;
-      link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
-      link.target = '_blank';
-      
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      console.error('Error downloading audio:', error);
-    }
   };
 
   // Don't render anything until mounted
@@ -264,6 +285,9 @@ export default function Dashboard() {
                             title={podcast.title}
                             showDownload={true}
                             className="w-full"
+                            onError={(error) => {
+                              console.error('Audio error for podcast:', podcast.id, error);
+                            }}
                           />
 
                           {/* Script Section */}
@@ -304,10 +328,20 @@ export default function Dashboard() {
                             variant="destructive" 
                             size="sm" 
                             onClick={() => handleDeletePodcast(podcast.id!)}
+                            disabled={deletingPodcast === podcast.id}
                             className="hover:bg-red-600 transition-colors"
                           >
-                            <Trash2 className="h-4 w-4 mr-1" />
-                            Delete
+                            {deletingPodcast === podcast.id ? (
+                              <>
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-1" />
+                                Deleting...
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="h-4 w-4 mr-1" />
+                                Delete
+                              </>
+                            )}
                           </Button>
                         </CardFooter>
                       </Card>

@@ -53,6 +53,9 @@ export const getUserPodcasts = async (userId: string): Promise<PodcastData[]> =>
 
     const response = await fetch(`/api/podcasts?userId=${encodeURIComponent(userId)}`, {
       method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     if (!response.ok) {
@@ -80,8 +83,15 @@ export const deletePodcast = async (podcastId: string, userId: string): Promise<
   try {
     console.log('Deleting podcast:', podcastId, 'for user:', userId);
 
-    const response = await fetch(`/api/podcasts/${podcastId}?userId=${encodeURIComponent(userId)}`, {
+    if (!podcastId || !userId) {
+      throw new Error('Both podcastId and userId are required');
+    }
+
+    const response = await fetch(`/api/podcasts/${encodeURIComponent(podcastId)}?userId=${encodeURIComponent(userId)}`, {
       method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     if (!response.ok) {
@@ -92,10 +102,19 @@ export const deletePodcast = async (podcastId: string, userId: string): Promise<
       } catch {
         errorData = { error: errorText || 'Failed to delete podcast' };
       }
-      throw new Error(errorData.error || 'Failed to delete podcast');
+      
+      // Handle specific error cases
+      if (response.status === 404) {
+        throw new Error('Podcast not found or you do not have permission to delete it');
+      } else if (response.status === 400) {
+        throw new Error('Invalid request. Please check your parameters.');
+      } else {
+        throw new Error(errorData.error || 'Failed to delete podcast');
+      }
     }
 
-    console.log('Podcast deleted successfully');
+    const result = await response.json();
+    console.log('Podcast deleted successfully:', result);
   } catch (error) {
     console.error('Error deleting podcast:', error);
     throw error;

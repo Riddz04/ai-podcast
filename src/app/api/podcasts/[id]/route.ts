@@ -24,6 +24,7 @@ export async function DELETE(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Await the params to fix Next.js 15 compatibility
     const params = await context.params;
     const url = new URL(request.url);
     const userId = url.searchParams.get('userId');
@@ -36,33 +37,63 @@ export async function DELETE(
       );
     }
 
+    if (!podcastId) {
+      return NextResponse.json(
+        { error: 'podcastId is required' },
+        { status: 400 }
+      );
+    }
+
     console.log('Deleting podcast:', podcastId, 'for user:', userId);
 
     const supabase = getSupabaseAdmin();
 
-    // First, get the podcast to check if it has an audio file
+    // First, get the podcast to check if it exists and belongs to the user
     const { data: podcast, error: fetchError } = await supabase
       .from('podcasts')
-      .select('audio_url')
+      .select('audio_url, user_id')
       .eq('id', podcastId)
       .eq('user_id', userId)
       .single();
 
     if (fetchError) {
       console.error('Error fetching podcast for deletion:', fetchError);
+      
+      if (fetchError.code === 'PGRST116') {
+        // No rows returned - podcast doesn't exist or doesn't belong to user
+        return NextResponse.json(
+          { error: 'Podcast not found or access denied' },
+          { status: 404 }
+        );
+      }
+      
       return NextResponse.json(
         { error: `Failed to fetch podcast: ${fetchError.message}` },
         { status: 500 }
       );
     }
 
+    if (!podcast) {
+      return NextResponse.json(
+        { error: 'Podcast not found or access denied' },
+        { status: 404 }
+      );
+    }
+
     // Delete audio file from storage if it exists
-    if (podcast?.audio_url) {
+    if (podcast.audio_url) {
       try {
-        const fileName = `${userId}/${podcastId}.mp3`;
+        // Extract the file path from the URL
+        const url = new URL(podcast.audio_url);
+        const pathParts = url.pathname.split('/');
+        const fileName = pathParts[pathParts.length - 1];
+        const filePath = `${userId}/${fileName}`;
+        
+        console.log('Attempting to delete audio file:', filePath);
+        
         const { error: deleteStorageError } = await supabase.storage
           .from('podcast-audio')
-          .remove([fileName]);
+          .remove([filePath]);
 
         if (deleteStorageError) {
           console.error('Error deleting audio file:', deleteStorageError);
@@ -71,7 +102,7 @@ export async function DELETE(
           console.log('Audio file deleted successfully');
         }
       } catch (storageError) {
-        console.error('Error deleting audio file:', storageError);
+        console.error('Error processing audio file deletion:', storageError);
         // Continue with podcast deletion
       }
     }
@@ -84,7 +115,7 @@ export async function DELETE(
       .eq('user_id', userId);
 
     if (deleteError) {
-      console.error('Error deleting podcast:', deleteError);
+      console.error('Error deleting podcast record:', deleteError);
       return NextResponse.json(
         { error: `Failed to delete podcast: ${deleteError.message}` },
         { status: 500 }
@@ -92,7 +123,10 @@ export async function DELETE(
     }
 
     console.log('Podcast deleted successfully');
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ 
+      success: true,
+      message: 'Podcast deleted successfully'
+    });
   } catch (error) {
     console.error('Error in DELETE /api/podcasts/[id]:', error);
     return NextResponse.json(
