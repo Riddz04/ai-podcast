@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/AuthContext';
 import { savePodcast } from '@/lib/podcastService';
 import { toast } from '@/components/ui/use-toast';
+import { AudioPlayer } from '@/components/AudioPlayer';
 
 interface Personality {
   name: string;
@@ -54,10 +55,8 @@ export default function DialogueScriptForm() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedSegments, setGeneratedSegments] = useState<PodcastSegment[]>([]);
   const [fullScript, setFullScript] = useState('');
-  const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [rawAudioSegments, setRawAudioSegments] = useState<AudioSegment[]>([]);
-  const audioRefs = useRef<(HTMLAudioElement | null)[]>([]);
 
   const handleTopicChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setTopic(e.target.value);
@@ -188,119 +187,6 @@ export default function DialogueScriptForm() {
     }
   };
 
-  const playSegment = (index: number) => {
-    try {
-      const segment = generatedSegments[index];
-      
-      // Check if this segment has valid audio
-      if (!segment?.audioUrl || !isValidAudioUrl(segment.audioUrl)) {
-        const errorMessage = segment?.error?.includes('quota_exceeded') 
-          ? "ElevenLabs API quota exceeded. Try again later or contact support."
-          : "Audio generation failed for this segment.";
-        
-        toast({
-          title: "Audio Unavailable",
-          description: errorMessage,
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      const audioElement = audioRefs.current[index];
-      if (!audioElement) {
-        console.error('Audio element not found for segment:', index);
-        toast({
-          title: "Playback Error",
-          description: "Audio player not found. Please try refreshing the page.",
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      if (currentlyPlaying === index) {
-        audioElement.pause();
-        setCurrentlyPlaying(null);
-      } else {
-        // Pause any currently playing audio
-        if (currentlyPlaying !== null && audioRefs.current[currentlyPlaying]) {
-          audioRefs.current[currentlyPlaying]?.pause();
-        }
-        
-        audioElement.play().catch(error => {
-          console.error('Error playing audio segment:', error);
-          toast({
-            title: "Playback Error",
-            description: "Failed to play audio segment. The audio file may be corrupted.",
-            variant: "destructive"
-          });
-        });
-        setCurrentlyPlaying(index);
-      }
-    } catch (error) {
-      console.error('Error in playSegment:', error);
-      toast({
-        title: "Playback Error",
-        description: "An unexpected error occurred during playback.",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const playAll = async () => {
-    if (currentlyPlaying !== null) {
-      audioRefs.current[currentlyPlaying]?.pause();
-      setCurrentlyPlaying(null);
-      return;
-    }
-
-    // Check if any segments have audio
-    const hasAudio = generatedSegments.some(segment => isValidAudioUrl(segment.audioUrl));
-    if (!hasAudio) {
-      toast({
-        title: "No Audio Available",
-        description: "None of the segments have audio available. API quota may be exceeded.",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    try {
-      for (let i = 0; i < generatedSegments.length; i++) {
-        // Skip segments without valid audio
-        if (!isValidAudioUrl(generatedSegments[i].audioUrl)) {
-          const errorMessage = generatedSegments[i].error?.includes('quota_exceeded') 
-            ? 'API quota exceeded.' 
-            : 'Audio generation failed.';
-          
-          toast({
-            title: "Skipping Segment",
-            description: `No audio available for ${generatedSegments[i].personality}. ${errorMessage}`
-          });
-          continue;
-        }
-        
-        const audioElement = audioRefs.current[i];
-        if (!audioElement) continue;
-        
-        setCurrentlyPlaying(i);
-        
-        try {
-          await audioElement.play();
-          await new Promise(resolve => {
-            audioElement.addEventListener('ended', resolve, { once: true });
-          });
-        } catch (error) {
-          console.error('Error playing segment:', i, error);
-          continue;
-        }
-      }
-    } catch (error) {
-      console.error('Error in playAll:', error);
-    } finally {
-      setCurrentlyPlaying(null);
-    }
-  };
-
   const downloadScript = () => {
     if (!fullScript) {
       toast({
@@ -378,15 +264,6 @@ export default function DialogueScriptForm() {
       setIsSaving(false);
     }
   };
-
-  const handleAudioError = (index: number, error?: Event) => {
-    console.error('Audio error for segment:', index, error);
-    setCurrentlyPlaying(null);
-  };
-
-  useEffect(() => {
-    audioRefs.current = audioRefs.current.slice(0, generatedSegments.length);
-  }, [generatedSegments]);
 
   return (
     <Card className="w-full max-w-4xl mx-auto bg-card dark:bg-card shadow-lg">
@@ -483,9 +360,6 @@ export default function DialogueScriptForm() {
             <div className="flex justify-between items-center">
               <h3 className="text-xl font-bold">Generated Podcast</h3>
               <div className="flex space-x-2">
-                <Button onClick={playAll} variant="outline" size="sm">
-                  {currentlyPlaying !== null ? 'Pause All' : 'Play All'}
-                </Button>
                 <Button onClick={downloadScript} variant="outline" size="sm">
                   Download Script
                 </Button>
@@ -505,29 +379,19 @@ export default function DialogueScriptForm() {
                 <div key={index} className="p-4 border rounded-lg bg-background/50 dark:bg-gray-800/50">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-semibold">{segment.personality}</h4>
-                    <Button
-                      onClick={() => playSegment(index)}
-                      variant="ghost"
-                      size="sm"
-                      className="text-primary"
-                      disabled={!isValidAudioUrl(segment.audioUrl)}
-                    >
-                      {currentlyPlaying === index ? 'Pause' : 'Play'}
-                    </Button>
                   </div>
-                  <p className="text-sm text-muted-foreground">{segment.text}</p>
-                  {isValidAudioUrl(segment.audioUrl) && (
-                    <audio
-                      ref={(el) => { audioRefs.current[index] = el; }}
-                      src={segment.audioUrl!}
-                      onEnded={() => setCurrentlyPlaying(null)}
-                      onError={(e) => handleAudioError(index, e)}
-                      onPause={() => setCurrentlyPlaying(null)}
-                      onPlay={() => setCurrentlyPlaying(index)}
-                      className="hidden"
-                      preload="metadata"
-                    />
-                  )}
+                  <p className="text-sm text-muted-foreground mb-3">{segment.text}</p>
+                  
+                  {/* Audio Player for each segment */}
+                  <AudioPlayer
+                    audioUrl={segment.audioUrl}
+                    title={`${segment.personality} - Segment ${index + 1}`}
+                    className="w-full"
+                    onError={(error) => {
+                      console.error('Audio error for segment:', index, error);
+                    }}
+                  />
+                  
                   {segment.error && (
                     <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
                       <p className="text-xs text-red-600 dark:text-red-400">

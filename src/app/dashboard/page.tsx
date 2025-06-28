@@ -9,15 +9,14 @@ import { getUserPodcasts, deletePodcast, PodcastData } from "@/lib/podcastServic
 import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Play, Trash2, Download, Clock, User, Calendar, Pause, FileText, Volume2 } from "lucide-react";
+import { AudioPlayer } from "@/components/AudioPlayer";
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
   const [podcasts, setPodcasts] = useState<PodcastData[]>([]);
   const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
-  const [currentlyPlaying, setCurrentlyPlaying] = useState<string | null>(null);
   const [expandedScript, setExpandedScript] = useState<string | null>(null);
-  const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -47,18 +46,6 @@ export default function Dashboard() {
     fetchPodcasts();
   }, [user, router, mounted]);
 
-  const isValidAudioUrl = (url?: string): boolean => {
-    if (!url || url.trim() === '') return false;
-    if (url === window.location.href) return false;
-    
-    try {
-      // Check if it's a valid data URL or HTTP URL
-      return url.startsWith('data:audio/') || url.startsWith('http://') || url.startsWith('https://');
-    } catch {
-      return false;
-    }
-  };
-
   const handleDeletePodcast = async (podcastId: string) => {
     if (!user) return;
     
@@ -70,77 +57,17 @@ export default function Dashboard() {
     }
   };
 
-  const handlePlayPause = (podcastId: string) => {
-    try {
-      const podcast = podcasts.find(p => p.id === podcastId);
-      
-      if (!podcast || !isValidAudioUrl(podcast.audioUrl)) {
-        console.error('Invalid audio source for podcast:', podcastId);
-        return;
-      }
-
-      const audioElement = audioRefs.current[podcastId];
-      
-      if (!audioElement) {
-        console.error('Audio element not found for podcast:', podcastId);
-        return;
-      }
-      
-      if (currentlyPlaying === podcastId) {
-        audioElement.pause();
-        setCurrentlyPlaying(null);
-      } else {
-        // Pause any currently playing audio
-        if (currentlyPlaying && audioRefs.current[currentlyPlaying]) {
-          audioRefs.current[currentlyPlaying]?.pause();
-        }
-        
-        // Play the selected audio
-        const playPromise = audioElement.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              setCurrentlyPlaying(podcastId);
-            })
-            .catch(error => {
-              console.error('Error playing audio:', error);
-              setCurrentlyPlaying(null);
-            });
-        }
-      }
-    } catch (error) {
-      console.error('Error in handlePlayPause:', error);
-    }
-  };
-
-  const handleAudioEnded = () => {
-    setCurrentlyPlaying(null);
-  };
-
-  const handleAudioError = (podcastId: string, error?: Event) => {
-    console.error('Audio error for podcast:', podcastId, error);
-    setCurrentlyPlaying(null);
-  };
-
   const toggleScript = (podcastId: string) => {
     setExpandedScript(expandedScript === podcastId ? null : podcastId);
   };
 
   const downloadAudio = (audioUrl: string, title: string) => {
     try {
-      // Validate the audio URL
-      if (!isValidAudioUrl(audioUrl)) {
-        console.error('Invalid audio URL for download');
-        return;
-      }
-
-      // Create a temporary link element
       const link = document.createElement('a');
       link.href = audioUrl;
       link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
       link.target = '_blank';
       
-      // Append to body, click, and remove
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -305,7 +232,7 @@ export default function Dashboard() {
                 ) : (
                   <div className="space-y-6">
                     {podcasts.map((podcast) => (
-                      <Card key={podcast.id} id={podcast.id} className="overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200 dark:border-gray-700">
+                      <Card key={podcast.id} className="overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200 dark:border-gray-700">
                         <CardHeader className="pb-4 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700">
                           <div className="flex justify-between items-start">
                             <div className="flex-1">
@@ -332,61 +259,12 @@ export default function Dashboard() {
                         
                         <CardContent className="p-6 space-y-4">
                           {/* Audio Player Section */}
-                          {isValidAudioUrl(podcast.audioUrl) ? (
-                            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
-                              <div className="flex items-center justify-between mb-3">
-                                <div className="flex items-center gap-2">
-                                  <Volume2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                                  <span className="font-medium text-blue-900 dark:text-blue-100">Audio Preview</span>
-                                </div>
-                                <Button
-                                  onClick={() => handlePlayPause(podcast.id!)}
-                                  variant="outline"
-                                  size="sm"
-                                  className="bg-white dark:bg-gray-800 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30"
-                                >
-                                  {currentlyPlaying === podcast.id ? (
-                                    <>
-                                      <Pause className="h-4 w-4 mr-1" />
-                                      Pause
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Play className="h-4 w-4 mr-1" />
-                                      Play
-                                    </>
-                                  )}
-                                </Button>
-                              </div>
-                              <audio
-                                ref={(el) => { audioRefs.current[podcast.id!] = el; }}
-                                controls
-                                className="w-full"
-                                onEnded={handleAudioEnded}
-                                onError={(e) => handleAudioError(podcast.id!, e)}
-                                onPause={() => setCurrentlyPlaying(null)}
-                                onPlay={() => setCurrentlyPlaying(podcast.id!)}
-                                preload="metadata"
-                              >
-                                <source src={podcast.audioUrl} type="audio/mpeg" />
-                                <source src={podcast.audioUrl} type="audio/wav" />
-                                <source src={podcast.audioUrl} type="audio/mp3" />
-                                Your browser does not support the audio element.
-                              </audio>
-                            </div>
-                          ) : (
-                            <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
-                              <div className="flex items-center gap-2 text-yellow-800 dark:text-yellow-200">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                                </svg>
-                                <span className="font-medium">No audio available</span>
-                              </div>
-                              <p className="text-sm text-yellow-700 dark:text-yellow-300 mt-1">
-                                Audio generation may have failed due to API limitations.
-                              </p>
-                            </div>
-                          )}
+                          <AudioPlayer
+                            audioUrl={podcast.audioUrl}
+                            title={podcast.title}
+                            showDownload={true}
+                            className="w-full"
+                          />
 
                           {/* Script Section */}
                           <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -431,20 +309,6 @@ export default function Dashboard() {
                             <Trash2 className="h-4 w-4 mr-1" />
                             Delete
                           </Button>
-                          
-                          <div className="flex gap-2">
-                            {isValidAudioUrl(podcast.audioUrl) && (
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => downloadAudio(podcast.audioUrl!, podcast.title)}
-                                className="bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
-                              >
-                                <Download className="h-4 w-4 mr-1" />
-                                Download Audio
-                              </Button>
-                            )}
-                          </div>
                         </CardFooter>
                       </Card>
                     ))}
