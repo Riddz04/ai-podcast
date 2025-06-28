@@ -93,8 +93,8 @@ export default function Dashboard() {
     setCurrentlyPlaying(null);
   };
 
-  const handleAudioError = (podcastId: string) => {
-    console.error('Audio error for podcast:', podcastId);
+  const handleAudioError = (podcastId: string, error?: Event) => {
+    console.error('Audio error for podcast:', podcastId, error);
     setCurrentlyPlaying(null);
   };
 
@@ -104,6 +104,12 @@ export default function Dashboard() {
 
   const downloadAudio = (audioUrl: string, title: string) => {
     try {
+      // Validate the audio URL
+      if (!audioUrl || audioUrl === window.location.href) {
+        console.error('Invalid audio URL for download');
+        return;
+      }
+
       // Create a temporary link element
       const link = document.createElement('a');
       link.href = audioUrl;
@@ -143,17 +149,22 @@ export default function Dashboard() {
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "Unknown date";
     
-    // Handle Supabase timestamp format (ISO string)
-    const date = typeof timestamp === 'string' ? new Date(timestamp) : 
-                 timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    
-    return new Intl.DateTimeFormat('en-US', {
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(date);
+    try {
+      // Handle Supabase timestamp format (ISO string)
+      const date = typeof timestamp === 'string' ? new Date(timestamp) : 
+                   timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+      
+      return new Intl.DateTimeFormat('en-US', {
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      }).format(date);
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return "Invalid date";
+    }
   };
 
   return (
@@ -328,7 +339,7 @@ export default function Dashboard() {
                                 controls
                                 className="w-full"
                                 onEnded={handleAudioEnded}
-                                onError={() => handleAudioError(podcast.id!)}
+                                onError={(e) => handleAudioError(podcast.id!, e)}
                                 onPause={() => setCurrentlyPlaying(null)}
                                 onPlay={() => setCurrentlyPlaying(podcast.id!)}
                                 preload="metadata"

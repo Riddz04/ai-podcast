@@ -19,7 +19,8 @@ interface Personality {
 interface PodcastSegment {
   personality: string;
   text: string;
-  audioUrl: string;
+  audioUrl: string | null;
+  error?: string;
 }
 
 interface PodcastData {
@@ -110,13 +111,14 @@ export default function DialogueScriptForm() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to generate podcast');
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || 'Failed to generate podcast');
       }
 
       const data = await response.json();
       
       // Check if there was an API quota error
-      const hasQuotaError = data.audioSegments.some((segment: any) => 
+      const hasQuotaError = data.audioSegments?.some((segment: any) => 
         segment.error && segment.error.includes('quota_exceeded')
       );
       
@@ -129,21 +131,22 @@ export default function DialogueScriptForm() {
       }
       
       // Map the API response to our component's expected format
-      const segments = data.audioSegments.map((segment: any) => ({
-        personality: segment.speaker,
-        text: segment.text,
+      const segments = (data.audioSegments || []).map((segment: any) => ({
+        personality: segment.speaker || 'Unknown Speaker',
+        text: segment.text || '',
         audioUrl: segment.audioBase64 ? `data:audio/mpeg;base64,${segment.audioBase64}` : null,
         error: segment.error
       }));
       
       setGeneratedSegments(segments);
-      setFullScript(data.script);
+      setFullScript(data.script || '');
       
     } catch (error) {
       console.error('Error generating podcast:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       toast({
         title: "Generation failed",
-        description: "There was an error generating your podcast. Please try again.",
+        description: `There was an error generating your podcast: ${errorMessage}`,
         variant: "destructive"
       });
     } finally {
@@ -152,26 +155,45 @@ export default function DialogueScriptForm() {
   };
 
   const playSegment = (index: number) => {
+    const segment = generatedSegments[index];
+    
     // Check if this segment has audio
-    if (!generatedSegments[index].audioUrl) {
+    if (!segment?.audioUrl) {
+      const errorMessage = segment?.error?.includes('quota_exceeded') 
+        ? "ElevenLabs API quota exceeded. Try again later or contact support."
+        : "Audio generation failed for this segment.";
+      
       toast({
         title: "Audio Unavailable",
-        description: generatedSegments[index].error?.includes('quota_exceeded') 
-          ? "ElevenLabs API quota exceeded. Try again later or contact support."
-          : "Audio generation failed for this segment.",
+        description: errorMessage,
         variant: "destructive"
       });
       return;
     }
     
+    const audioElement = audioRefs.current[index];
+    if (!audioElement) {
+      console.error('Audio element not found for segment:', index);
+      return;
+    }
+    
     if (currentlyPlaying === index) {
-      audioRefs.current[index]?.pause();
+      audioElement.pause();
       setCurrentlyPlaying(null);
     } else {
+      // Pause any currently playing audio
       if (currentlyPlaying !== null && audioRefs.current[currentlyPlaying]) {
         audioRefs.current[currentlyPlaying]?.pause();
       }
-      audioRefs.current[index]?.play();
+      
+      audioElement.play().catch(error => {
+        console.error('Error playing audio segment:', error);
+        toast({
+          title: "Playback Error",
+          description: "Failed to play audio segment. The audio file may be corrupted.",
+          variant: "destructive"
+        });
+      });
       setCurrentlyPlaying(index);
     }
   };
@@ -194,33 +216,70 @@ export default function DialogueScriptForm() {
       return;
     }
 
-    for (let i = 0; i < generatedSegments.length; i++) {
-      // Skip segments without audio
-      if (!generatedSegments[i].audioUrl) {
-        toast({
-          title: "Skipping Segment",
-          description: `No audio available for ${generatedSegments[i].personality}. ${generatedSegments[i].error?.includes('quota_exceeded') ? 'API quota exceeded.' : ''}`
-        });
-        continue;
+    try {
+      for (let i = 0; i < generatedSegments.length; i++) {
+        // Skip segments without audio
+        if (!generatedSegments[i].audioUrl) {
+          const errorMessage = generatedSegments[i].error?.includes('quota_exceeded') 
+            ? 'API quota exceeded.' 
+            : 'Audio generation failed.';
+          
+          toast({
+            title: "Skipping Segment",
+            description: `No audio available for ${generatedSegments[i].personality}. ${errorMessage}`
+          });
+          continue;
+        }
+        
+        const audioElement = audioRefs.current[i];
+        if (!audioElement) continue;
+        
+        setCurrentlyPlaying(i);
+        
+        try {
+          await audioElement.play();
+          await new Promise(resolve => {
+            audioElement.addEventListener('ended', resolve, { once: true });
+          });
+        } catch (error) {
+          console.error('Error playing segment:', i, error);
+          continue;
+        }
       }
-      
-      setCurrentlyPlaying(i);
-      audioRefs.current[i]?.play();
-      await new Promise(resolve => {
-        audioRefs.current[i]?.addEventListener('ended', resolve, { once: true });
-      });
+    } catch (error) {
+      console.error('Error in playAll:', error);
+    } finally {
+      setCurrentlyPlaying(null);
     }
-    setCurrentlyPlaying(null);
   };
 
   const downloadScript = () => {
-    const element = document.createElement('a');
-    const file = new Blob([fullScript], { type: 'text/plain' });
-    element.href = URL.createObjectURL(file);
-    element.download = `podcast-script-${new Date().toISOString().split('T')[0]}.txt`;
-    document.body.appendChild(element);
-    element.click();
-    document.body.removeChild(element);
+    if (!fullScript) {
+      toast({
+        title: "No Script Available",
+        description: "Please generate a podcast first.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const element = document.createElement('a');
+      const file = new Blob([fullScript], { type: 'text/plain' });
+      element.href = URL.createObjectURL(file);
+      element.download = `podcast-script-${new Date().toISOString().split('T')[0]}.txt`;
+      document.body.appendChild(element);
+      element.click();
+      document.body.removeChild(element);
+      URL.revokeObjectURL(element.href);
+    } catch (error) {
+      console.error('Error downloading script:', error);
+      toast({
+        title: "Download Failed",
+        description: "Failed to download the script. Please try again.",
+        variant: "destructive"
+      });
+    }
   };
 
   const savePodcastToLibrary = async () => {
@@ -240,26 +299,33 @@ export default function DialogueScriptForm() {
         segment.audioUrl && segment.audioUrl !== null && !segment.error
       );
 
-      if (!segmentWithAudio) {
-        toast({
-          title: "Cannot Save",
-          description: "No audio segments are available. API quota may be exceeded.",
-          variant: "destructive"
-        });
-        return;
-      }
+      let audioBase64: string | undefined;
 
-      // Convert the audio URL to a blob
-      const response = await fetch(segmentWithAudio.audioUrl);
-      const audioBlob = await response.blob();
-      
-      // Convert the audio blob to a base64 string
-      const reader = new FileReader();
-      const audioBase64Promise = new Promise<string>((resolve) => {
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(audioBlob);
-      });
-      const audioBase64 = await audioBase64Promise;
+      if (segmentWithAudio?.audioUrl) {
+        try {
+          // Convert the audio URL to a blob
+          const response = await fetch(segmentWithAudio.audioUrl);
+          if (!response.ok) {
+            throw new Error('Failed to fetch audio data');
+          }
+          
+          const audioBlob = await response.blob();
+          
+          // Convert the audio blob to a base64 string
+          const reader = new FileReader();
+          audioBase64 = await new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.onerror = reject;
+            reader.readAsDataURL(audioBlob);
+          });
+        } catch (audioError) {
+          console.error('Error processing audio:', audioError);
+          toast({
+            title: "Audio Processing Warning",
+            description: "Failed to process audio, but the podcast will be saved without audio.",
+          });
+        }
+      }
       
       // Create a title from the topic, ensuring it's not too long
       const podcastTitle = topic.length > 50 
@@ -287,9 +353,10 @@ export default function DialogueScriptForm() {
       }
     } catch (error) {
       console.error('Error saving podcast:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
       toast({
         title: "Save failed",
-        description: "There was an error saving your podcast. Please try again.",
+        description: `There was an error saving your podcast: ${errorMessage}`,
         variant: "destructive"
       });
     } finally {
@@ -434,11 +501,20 @@ export default function DialogueScriptForm() {
                       ref={(el) => { audioRefs.current[index] = el; }}
                       src={segment.audioUrl}
                       onEnded={() => setCurrentlyPlaying(null)}
+                      onError={() => {
+                        console.error('Audio error for segment:', index);
+                        setCurrentlyPlaying(null);
+                      }}
                       className="hidden"
+                      preload="metadata"
                     />
                   )}
                   {segment.error && (
-                    <p className="text-xs text-red-500 mt-1">Error: {segment.error}</p>
+                    <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        <strong>Error:</strong> {segment.error}
+                      </p>
+                    </div>
                   )}
                 </div>
               ))}

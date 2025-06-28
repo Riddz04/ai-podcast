@@ -27,7 +27,13 @@ export const savePodcast = async (podcastData: PodcastData, audioBase64?: string
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Failed to save podcast' };
+      }
       throw new Error(errorData.error || 'Failed to save podcast');
     }
 
@@ -50,7 +56,13 @@ export const getUserPodcasts = async (userId: string): Promise<PodcastData[]> =>
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Failed to fetch podcasts' };
+      }
       throw new Error(errorData.error || 'Failed to fetch podcasts');
     }
 
@@ -73,7 +85,13 @@ export const deletePodcast = async (podcastId: string, userId: string): Promise<
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Failed to delete podcast' };
+      }
       throw new Error(errorData.error || 'Failed to delete podcast');
     }
 
