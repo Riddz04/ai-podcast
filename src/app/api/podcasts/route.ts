@@ -51,19 +51,32 @@ export async function GET(request: NextRequest) {
 
     console.log('Podcasts fetched successfully:', data?.length || 0);
 
-    // Convert to our interface format
-    const podcasts = (data || []).map(row => ({
-      id: row.id,
-      userId: row.user_id,
-      title: row.title,
-      topic: row.topic,
-      personality1: row.personality1,
-      personality2: row.personality2,
-      script: row.script,
-      audioUrl: row.audio_url || undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    // Convert to our interface format and ensure audio URLs are accessible
+    const podcasts = (data || []).map(row => {
+      let audioUrl = row.audio_url;
+      
+      // If audio_url exists but doesn't start with http, it might be a storage path
+      if (audioUrl && !audioUrl.startsWith('http') && !audioUrl.startsWith('data:')) {
+        // Convert storage path to public URL
+        const { data: urlData } = supabase.storage
+          .from('podcast-audio')
+          .getPublicUrl(audioUrl);
+        audioUrl = urlData.publicUrl;
+      }
+      
+      return {
+        id: row.id,
+        userId: row.user_id,
+        title: row.title,
+        topic: row.topic,
+        personality1: row.personality1,
+        personality2: row.personality2,
+        script: row.script,
+        audioUrl: audioUrl || undefined,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+    });
 
     return NextResponse.json({ podcasts });
   } catch (error) {
@@ -144,13 +157,14 @@ export async function POST(request: NextRequest) {
 
           console.log('Audio blob created, size:', audioBlob.size);
 
-          // Upload to Supabase Storage
+          // Upload to Supabase Storage with public access
           const fileName = `${podcastData.userId}/${podcast.id}.mp3`;
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('podcast-audio')
             .upload(fileName, audioBlob, {
               contentType: 'audio/mpeg',
-              upsert: true
+              upsert: true,
+              cacheControl: '3600'
             });
 
           if (uploadError) {

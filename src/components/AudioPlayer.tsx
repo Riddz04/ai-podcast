@@ -53,10 +53,16 @@ export function AudioPlayer({
     if (!isValidAudioUrl(audioUrl)) return null;
 
     const audio = new Audio();
-    audio.crossOrigin = 'anonymous';
-    audio.preload = 'metadata';
     
-    // Set multiple source formats for better compatibility
+    // For Supabase URLs, don't set crossOrigin to avoid CORS issues
+    if (audioUrl!.includes('supabase')) {
+      // Don't set crossOrigin for Supabase storage URLs
+      audio.preload = 'metadata';
+    } else {
+      audio.crossOrigin = 'anonymous';
+      audio.preload = 'metadata';
+    }
+    
     audio.src = audioUrl!;
     
     return audio;
@@ -104,7 +110,7 @@ export function AudioPlayer({
             message = 'Audio loading was aborted';
             break;
           case MediaError.MEDIA_ERR_NETWORK:
-            message = 'Network error while loading audio';
+            message = 'Network error while loading audio. Please check your internet connection.';
             break;
           case MediaError.MEDIA_ERR_DECODE:
             message = 'Audio format not supported or corrupted';
@@ -115,6 +121,11 @@ export function AudioPlayer({
           default:
             message = 'Unknown audio error occurred';
         }
+      }
+      
+      // Check if it's a CORS error
+      if (audioUrl?.includes('supabase') && message.includes('Network error')) {
+        message = 'Audio file access denied. Please check Supabase storage permissions.';
       }
       
       setHasError(true);
@@ -235,6 +246,8 @@ export function AudioPlayer({
           message = 'Audio format not supported by your browser';
         } else if (error.name === 'NotAllowedError') {
           message = 'Audio playback not allowed. Please interact with the page first.';
+        } else if (error.message.includes('CORS')) {
+          message = 'Audio file access denied due to CORS policy. Please check storage permissions.';
         } else {
           message = error.message || 'Unknown playback error';
         }
@@ -307,14 +320,29 @@ export function AudioPlayer({
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
       } else {
-        // For regular URLs
-        const link = document.createElement('a');
-        link.href = audioUrl!;
-        link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // For regular URLs, try to fetch and download
+        try {
+          const response = await fetch(audioUrl!, { mode: 'cors' });
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+          
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        } catch (fetchError) {
+          // Fallback to direct link
+          const link = document.createElement('a');
+          link.href = audioUrl!;
+          link.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp3`;
+          link.target = '_blank';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
       }
     } catch (error) {
       console.error('Download error:', error);
