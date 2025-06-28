@@ -31,7 +31,8 @@ interface PodcastData {
   personality2: string;
   script: string;
   audioUrl?: string;
-  createdAt?: any;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export default function DialogueScriptForm() {
@@ -123,7 +124,7 @@ export default function DialogueScriptForm() {
         toast({
           title: "API Quota Exceeded",
           description: "Some audio segments couldn't be generated due to ElevenLabs API quota limitations. You can still save the podcast with available audio or try again later.",
-          variant: "warning"
+          variant: "destructive"
         });
       }
       
@@ -274,7 +275,6 @@ export default function DialogueScriptForm() {
         personality2: personalities[1]?.name || 'Speaker 2',
         script: fullScript,
         topic,
-        createdAt: new Date()
       }, audioBase64);
 
       toast({

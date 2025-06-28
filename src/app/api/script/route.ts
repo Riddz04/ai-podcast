@@ -1,13 +1,12 @@
-// pages/api/generate-podcast.js or app/api/generate-podcast/route.js
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
   baseURL: "https://api.novita.ai/v3/openai",
-  apiKey: process.env.NOVITA_API_KEY as string, // Assuming NOVITA_API_KEY is always set
+  apiKey: process.env.NOVITA_API_KEY as string,
 });
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY as string; // Assuming ELEVENLABS_API_KEY is always set
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY as string;
 const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1";
 
 // Define a type for the voice keys
@@ -62,10 +61,18 @@ export const POST = async (req: NextRequest): Promise<NextResponse> => {
       voice2Type = "female_clear" 
     } = await req.json() as PodcastRequestBody;
     
-    if (!process.env.NOVITA_API_KEY || !process.env.ELEVENLABS_API_KEY) {
-      console.error('API keys are not configured.');
+    if (!process.env.NOVITA_API_KEY) {
+      console.error('NOVITA_API_KEY is not configured.');
       return NextResponse.json(
-        { error: "Server configuration error: API keys missing." }, 
+        { error: "Server configuration error: NOVITA_API_KEY missing." }, 
+        { status: 500 }
+      );
+    }
+
+    if (!process.env.ELEVENLABS_API_KEY) {
+      console.error('ELEVENLABS_API_KEY is not configured.');
+      return NextResponse.json(
+        { error: "Server configuration error: ELEVENLABS_API_KEY missing." }, 
         { status: 500 }
       );
     }

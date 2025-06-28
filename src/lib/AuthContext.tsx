@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { auth, googleProvider } from "@/lib/firebase";
 import { signInWithPopup, signOut, onAuthStateChanged, User } from "firebase/auth";
 import { useToast } from "@/components/ui/use-toast";
+import { supabase } from "@/lib/supabase";
 
 interface AuthContextType {
   user: User | null;
@@ -19,8 +20,36 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const { toast } = useToast();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setUser(user);
+      
+      // Set up Supabase auth for RLS policies
+      if (user) {
+        try {
+          // Get Firebase ID token
+          const token = await user.getIdToken();
+          
+          // Create a custom JWT payload for Supabase
+          const customClaims = {
+            sub: user.uid,
+            email: user.email,
+            aud: 'authenticated',
+            role: 'authenticated',
+          };
+
+          // Set the auth context for Supabase RLS
+          await supabase.auth.setSession({
+            access_token: token,
+            refresh_token: '',
+          });
+        } catch (error) {
+          console.error('Error setting up Supabase auth:', error);
+        }
+      } else {
+        // Clear Supabase session when user logs out
+        await supabase.auth.signOut();
+      }
+      
       setLoading(false);
     });
     return () => unsubscribe();

@@ -79,7 +79,10 @@ export default function Dashboard() {
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "Unknown date";
     
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    // Handle Supabase timestamp format (ISO string)
+    const date = typeof timestamp === 'string' ? new Date(timestamp) : 
+                 timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+    
     return new Intl.DateTimeFormat('en-US', {
       year: 'numeric', 
       month: 'short', 
