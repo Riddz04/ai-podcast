@@ -57,6 +57,9 @@ export default function DialogueScriptForm() {
   const [fullScript, setFullScript] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [rawAudioSegments, setRawAudioSegments] = useState<AudioSegment[]>([]);
+  const [currentlyPlaying, setCurrentlyPlaying] = useState<number | null>(null);
+  const [isPlayingAll, setIsPlayingAll] = useState(false);
+  const audioRefs = useRef<(HTMLAudioElement | null)[]>([]);
 
   const handleTopicChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setTopic(e.target.value);
@@ -91,10 +94,221 @@ export default function DialogueScriptForm() {
     if (url === window.location.href) return false;
     
     try {
-      // Check if it's a valid data URL or HTTP URL
       return url.startsWith('data:audio/') || url.startsWith('http://') || url.startsWith('https://');
     } catch {
       return false;
+    }
+  };
+
+  // Fixed audio merging function
+  const mergeAudioSegments = async (segments: AudioSegment[]): Promise<string | null> => {
+    try {
+      const validSegments = segments.filter(segment => segment.audioBase64 && !segment.error);
+      
+      if (validSegments.length === 0) {
+        console.log('No valid segments to merge');
+        return null;
+      }
+
+      if (validSegments.length === 1) {
+        return validSegments[0].audioBase64;
+      }
+
+      // Use Web Audio API for proper merging
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const audioBuffers: AudioBuffer[] = [];
+      let totalDuration = 0;
+
+      // Decode all audio segments
+      for (let i = 0; i < validSegments.length; i++) {
+        try {
+          const segment = validSegments[i];
+          // Convert base64 to ArrayBuffer
+          const binaryString = atob(segment.audioBase64!);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let j = 0; j < binaryString.length; j++) {
+            bytes[j] = binaryString.charCodeAt(j);
+          }
+          
+          const audioBuffer = await audioContext.decodeAudioData(bytes.buffer);
+          audioBuffers.push(audioBuffer);
+          totalDuration += audioBuffer.duration;
+          console.log(`Decoded segment ${i + 1}: ${audioBuffer.duration}s`);
+        } catch (error) {
+          console.error(`Error decoding audio segment ${i}:`, error);
+        }
+      }
+
+      if (audioBuffers.length === 0) {
+        console.log('No audio buffers decoded successfully');
+        return null;
+      }
+
+      console.log(`Merging ${audioBuffers.length} segments, total duration: ${totalDuration}s`);
+
+      // Calculate total length in samples
+      const sampleRate = audioBuffers[0].sampleRate;
+      const numberOfChannels = audioBuffers[0].numberOfChannels;
+      const totalSamples = Math.floor(totalDuration * sampleRate);
+
+      // Create merged buffer
+      const mergedBuffer = audioContext.createBuffer(numberOfChannels, totalSamples, sampleRate);
+
+      // Copy all buffers into the merged buffer
+      let offsetSamples = 0;
+      for (const buffer of audioBuffers) {
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          const channelData = mergedBuffer.getChannelData(channel);
+          const sourceData = buffer.getChannelData(channel);
+          channelData.set(sourceData, offsetSamples);
+        }
+        offsetSamples += buffer.length;
+      }
+
+      // Convert merged buffer back to base64
+      // Create a simple WAV file
+      const length = mergedBuffer.length * numberOfChannels * 2;
+      const buffer = new ArrayBuffer(44 + length);
+      const view = new DataView(buffer);
+      
+      // WAV header
+      const writeString = (offset: number, string: string) => {
+        for (let i = 0; i < string.length; i++) {
+          view.setUint8(offset + i, string.charCodeAt(i));
+        }
+      };
+      
+      writeString(0, 'RIFF');
+      view.setUint32(4, 36 + length, true);
+      writeString(8, 'WAVE');
+      writeString(12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, numberOfChannels, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * numberOfChannels * 2, true);
+      view.setUint16(32, numberOfChannels * 2, true);
+      view.setUint16(34, 16, true);
+      writeString(36, 'data');
+      view.setUint32(40, length, true);
+
+      // Convert float samples to 16-bit PCM
+      let offset = 44;
+      for (let i = 0; i < mergedBuffer.length; i++) {
+        for (let channel = 0; channel < numberOfChannels; channel++) {
+          const sample = Math.max(-1, Math.min(1, mergedBuffer.getChannelData(channel)[i]));
+          view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+          offset += 2;
+        }
+      }
+
+      // Convert to base64
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
+      
+      console.log('Audio merging completed successfully');
+      return base64;
+      
+    } catch (error) {
+      console.error('Error merging audio segments:', error);
+      // Fallback: concatenate base64 strings (not ideal but better than losing data)
+      const validSegments = segments.filter(segment => segment.audioBase64 && !segment.error);
+      if (validSegments.length > 0) {
+        console.log('Using fallback concatenation method');
+        return validSegments.map(s => s.audioBase64).join('');
+      }
+      return null;
+    }
+  };
+
+  // Fixed Play All function - simplified approach like your original code
+ // Clean and simple playAll function - similar to your working playSegment approach
+const playAll = async () => {
+  if (currentlyPlaying !== null) {
+    audioRefs.current[currentlyPlaying]?.pause();
+    setCurrentlyPlaying(null);
+    return;
+  }
+
+  // Check if any segments have audio
+  const hasAudio = generatedSegments.some(segment => segment.audioUrl !== null);
+  if (!hasAudio) {
+    toast({
+      title: "No Audio Available",
+      description: "None of the segments have audio available. API quota may be exceeded.",
+      variant: "destructive"
+    });
+    return;
+  }
+
+  for (let i = 0; i < generatedSegments.length; i++) {
+    // Skip segments without audio
+    if (!generatedSegments[i].audioUrl) {
+      console.log(`Skipping segment ${i} - no audio available`);
+      continue;
+    }
+    
+    setCurrentlyPlaying(i);
+    
+    const audioElement = audioRefs.current[i];
+    if (audioElement) {
+      try {
+        await audioElement.play();
+        
+        // Wait for this segment to finish
+        await new Promise((resolve, reject) => {
+          const handleEnded = () => {
+            audioElement.removeEventListener('ended', handleEnded);
+            audioElement.removeEventListener('error', handleError);
+            resolve();
+          };
+          
+          const handleError = (error) => {
+            audioElement.removeEventListener('ended', handleEnded);
+            audioElement.removeEventListener('error', handleError);
+            console.error(`Error playing segment ${i}:`, error);
+            resolve(); // Continue to next segment even on error
+          };
+          
+          audioElement.addEventListener('ended', handleEnded);
+          audioElement.addEventListener('error', handleError);
+        });
+      } catch (error) {
+        console.error(`Failed to play segment ${i}:`, error);
+      }
+    }
+  }
+  
+  setCurrentlyPlaying(null);
+};
+
+  // Simple play segment function
+  const playSegment = (index: number) => {
+    // Check if this segment has audio
+    if (!generatedSegments[index].audioUrl) {
+      toast({
+        title: "Audio Unavailable",
+        description: generatedSegments[index].error?.includes('quota_exceeded') 
+          ? "ElevenLabs API quota exceeded. Try again later or contact support."
+          : "Audio generation failed for this segment.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (currentlyPlaying === index) {
+      audioRefs.current[index]?.pause();
+      setCurrentlyPlaying(null);
+    } else {
+      if (currentlyPlaying !== null && audioRefs.current[currentlyPlaying]) {
+        audioRefs.current[currentlyPlaying]?.pause();
+      }
+      audioRefs.current[index]?.play();
+      setCurrentlyPlaying(index);
     }
   };
 
@@ -114,7 +328,6 @@ export default function DialogueScriptForm() {
     setRawAudioSegments([]);
 
     try {
-      // Map the first two personalities to the API format
       const personality1 = personalities[0]?.name || '';
       const personality2 = personalities[1]?.name || '';
       const voice1Type = personalities[0]?.voice || 'male_confident';
@@ -147,7 +360,6 @@ export default function DialogueScriptForm() {
 
       const data = await response.json();
       
-      // Check if there was an API quota error
       const hasQuotaError = data.audioSegments?.some((segment: any) => 
         segment.error && segment.error.includes('quota_exceeded')
       );
@@ -160,10 +372,8 @@ export default function DialogueScriptForm() {
         });
       }
       
-      // Store raw audio segments for saving
       setRawAudioSegments(data.audioSegments || []);
       
-      // Map the API response to our component's expected format
       const segments = (data.audioSegments || []).map((segment: any) => ({
         personality: segment.speaker || 'Unknown Speaker',
         text: segment.text || '',
@@ -173,6 +383,9 @@ export default function DialogueScriptForm() {
       
       setGeneratedSegments(segments);
       setFullScript(data.script || '');
+      
+      // Initialize refs
+      audioRefs.current = new Array(segments.length).fill(null);
       
     } catch (error) {
       console.error('Error generating podcast:', error);
@@ -228,11 +441,32 @@ export default function DialogueScriptForm() {
 
     setIsSaving(true);
     try {
-      // Create a title from the topic, ensuring it's not too long
       const podcastTitle = topic.length > 50 
         ? `${topic.substring(0, 47)}...` 
         : topic;
       
+      console.log('Starting audio merge process...');
+      const mergedAudioBase64 = await mergeAudioSegments(rawAudioSegments);
+      
+      let audioSegmentsToSave;
+      if (mergedAudioBase64) {
+        // Save as single merged segment
+        audioSegmentsToSave = [{
+          speaker: 'Full Podcast',
+          text: fullScript,
+          isPersonality1: true,
+          segmentIndex: 0,
+          audioBase64: mergedAudioBase64,
+          voiceId: null,
+          duration: rawAudioSegments.reduce((total, segment) => total + (segment.duration || 0), 0)
+        }];
+        console.log('Merged audio created successfully');
+      } else {
+        // Fallback: save all individual segments
+        audioSegmentsToSave = rawAudioSegments;
+        console.log('Using individual segments as fallback');
+      }
+
       const podcastId = await savePodcast({
         userId: user.id,
         title: podcastTitle,
@@ -240,14 +474,15 @@ export default function DialogueScriptForm() {
         personality2: personalities[1]?.name || 'Speaker 2',
         script: fullScript,
         topic,
-      }, rawAudioSegments);
+      }, audioSegmentsToSave);
 
       toast({
         title: "Podcast saved",
-        description: "Your podcast has been saved to your library.",
+        description: mergedAudioBase64 
+          ? "Your podcast has been saved to your library with merged audio."
+          : "Your podcast has been saved to your library with individual segments.",
       });
       
-      // Optional: Redirect to the library tab
       const libraryTab = document.querySelector('[data-value="saved"]') as HTMLElement;
       if (libraryTab) {
         libraryTab.click();
@@ -264,6 +499,11 @@ export default function DialogueScriptForm() {
       setIsSaving(false);
     }
   };
+
+  // Update refs when segments change
+  useEffect(() => {
+    audioRefs.current = audioRefs.current.slice(0, generatedSegments.length);
+  }, [generatedSegments]);
 
   return (
     <Card className="w-full max-w-4xl mx-auto bg-card dark:bg-card shadow-lg">
@@ -360,6 +600,15 @@ export default function DialogueScriptForm() {
             <div className="flex justify-between items-center">
               <h3 className="text-xl font-bold">Generated Podcast</h3>
               <div className="flex space-x-2">
+                <Button 
+                  onClick={playAll}
+                  variant="outline" 
+                  size="sm"
+                  disabled={!generatedSegments.some(s => s.audioUrl)}
+                  className="bg-green-600 hover:bg-green-700 text-white border-green-600"
+                >
+                  {isPlayingAll ? 'Stop All' : 'Play All'}
+                </Button>
                 <Button onClick={downloadScript} variant="outline" size="sm">
                   Download Script
                 </Button>
@@ -379,18 +628,40 @@ export default function DialogueScriptForm() {
                 <div key={index} className="p-4 border rounded-lg bg-background/50 dark:bg-gray-800/50">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="font-semibold">{segment.personality}</h4>
+                    <div className="flex items-center space-x-2">
+                      {currentlyPlaying === index && (
+                        <span className="text-sm text-green-600 font-medium">Playing...</span>
+                      )}
+                      <Button
+                        onClick={() => playSegment(index)}
+                        variant="ghost"
+                        size="sm"
+                        className="text-primary"
+                        disabled={!segment.audioUrl}
+                      >
+                        {currentlyPlaying === index ? 'Pause' : 'Play'}
+                      </Button>
+                    </div>
                   </div>
                   <p className="text-sm text-muted-foreground mb-3">{segment.text}</p>
                   
-                  {/* Audio Player for each segment */}
-                  <AudioPlayer
-                    audioUrl={segment.audioUrl}
-                    title={`${segment.personality} - Segment ${index + 1}`}
-                    className="w-full"
-                    onError={(error) => {
-                      console.error('Audio error for segment:', index, error);
-                    }}
-                  />
+                  {segment.audioUrl && (
+                    <audio
+                      ref={(el) => { audioRefs.current[index] = el; }}
+                      src={segment.audioUrl}
+                      onEnded={() => setCurrentlyPlaying(null)}
+                      className="w-full"
+                      controls
+                    />
+                  )}
+                  
+                  {!segment.audioUrl && (
+                    <div className="p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded">
+                      <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                        No audio available for this segment.
+                      </p>
+                    </div>
+                  )}
                   
                   {segment.error && (
                     <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
