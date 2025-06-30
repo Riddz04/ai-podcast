@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { getUserPodcasts, deletePodcast, PodcastData } from "@/lib/podcastService";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Trash2, Clock, User, Calendar, FileText } from "lucide-react";
+import { Trash2, Clock, User, Calendar, FileText, Share2 } from "lucide-react";
 import { AudioPlayer } from "@/components/AudioPlayer";
 import { toast } from "@/components/ui/use-toast";
 
@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [mounted, setMounted] = useState(false);
   const [expandedScript, setExpandedScript] = useState<string | null>(null);
   const [deletingPodcast, setDeletingPodcast] = useState<string | null>(null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -90,6 +91,37 @@ export default function Dashboard() {
     } finally {
       setDeletingPodcast(null);
     }
+  };
+
+  const handleSharePodcast = (podcastId: string) => {
+    const shareUrl = `${window.location.origin}/shared/${podcastId}`;
+    navigator.clipboard.writeText(shareUrl)
+      .then(() => {
+        toast({
+          title: "Success",
+          description: (
+            <div className="flex flex-col">
+              <span>Share link copied to clipboard!</span>
+              <a 
+                href={shareUrl} 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-blue-500 hover:text-blue-700 underline mt-1 text-sm"
+              >
+                Open shared podcast
+              </a>
+            </div>
+          )
+        });
+      })
+      .catch((error) => {
+        console.error("Error copying share link:", error);
+        toast({
+          title: "Error",
+          description: "Failed to copy share link",
+          variant: "destructive"
+        });
+      });
   };
 
   const toggleScript = (podcastId: string) => {
@@ -348,25 +380,36 @@ export default function Dashboard() {
                         </CardContent>
                         
                         <CardFooter className="flex justify-between pt-4 border-t border-gray-200 dark:border-gray-700 bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 p-4">
-                          <Button 
-                            variant="destructive" 
-                            size="sm" 
-                            onClick={() => handleDeletePodcast(podcast.id!)}
-                            disabled={deletingPodcast === podcast.id}
-                            className="bg-red-500 hover:bg-red-600 transition-all duration-200 shadow-sm hover:shadow focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
-                          >
-                            {deletingPodcast === podcast.id ? (
-                              <>
-                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                                Deleting...
-                              </>
-                            ) : (
-                              <>
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Delete Podcast
-                              </>
-                            )}
-                          </Button>
+                          <div className="flex gap-2">
+                            <Button 
+                              variant="destructive" 
+                              size="sm" 
+                              onClick={() => handleDeletePodcast(podcast.id!)}
+                              disabled={deletingPodcast === podcast.id}
+                              className="bg-red-500 hover:bg-red-600 transition-all duration-200 shadow-sm hover:shadow focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+                            >
+                              {deletingPodcast === podcast.id ? (
+                                <>
+                                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                                  Deleting...
+                                </>
+                              ) : (
+                                <>
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete Podcast
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSharePodcast(podcast.id!)}
+                              className="border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/30 transition-all duration-200"
+                            >
+                              <Share2 className="h-4 w-4 mr-2" />
+                              Share
+                            </Button>
+                          </div>
                         </CardFooter>
                       </Card>
                     ))}
