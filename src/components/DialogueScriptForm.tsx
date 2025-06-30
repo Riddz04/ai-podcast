@@ -7,6 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/lib/AuthContext';
 import { savePodcast } from '@/lib/podcastService';
 import { toast } from '@/components/ui/use-toast';
@@ -50,8 +52,19 @@ interface PodcastData {
 
 export default function DialogueScriptForm() {
   const { user } = useAuth();
+  
+  // Regular podcast states
   const [topic, setTopic] = useState('');
   const [personalities, setPersonalities] = useState<Personality[]>([{ name: '', voice: '' }, { name: '', voice: '' }]);
+  
+  // YouTube podcast states
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [youtubePersonalities, setYoutubePersonalities] = useState<Personality[]>([{ name: '', voice: '' }, { name: '', voice: '' }]);
+  const [podcastStyle, setPodcastStyle] = useState<'discussion' | 'interview' | 'debate' | 'analysis'>('discussion');
+  const [focusAspects, setFocusAspects] = useState<string[]>([]);
+  const [customFocusAspect, setCustomFocusAspect] = useState('');
+  
+  // Common states
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedSegments, setGeneratedSegments] = useState<PodcastSegment[]>([]);
   const [fullScript, setFullScript] = useState('');
@@ -77,19 +90,40 @@ export default function DialogueScriptForm() {
     setPersonalities(newPersonalities);
   };
 
-  // Personalities are fixed at 2 as required
+  const handleYoutubePersonalityNameChange = (index: number, value: string) => {
+    const newPersonalities = [...youtubePersonalities];
+    newPersonalities[index].name = value;
+    setYoutubePersonalities(newPersonalities);
+  };
 
-  const isValidAudioUrl = (url: string | null): boolean => {
-    if (!url || url.trim() === '') return false;
-    if (url === window.location.href) return false;
-    
-    try {
-      return url.startsWith('data:audio/') || url.startsWith('http://') || url.startsWith('https://');
-    } catch {
-      return false;
+  const handleYoutubePersonalityVoiceChange = (index: number, value: string) => {
+    const newPersonalities = [...youtubePersonalities];
+    newPersonalities[index].voice = value;
+    setYoutubePersonalities(newPersonalities);
+  };
+
+  const handleFocusAspectChange = (aspect: string, checked: boolean) => {
+    if (checked) {
+      setFocusAspects([...focusAspects, aspect]);
+    } else {
+      setFocusAspects(focusAspects.filter(a => a !== aspect));
     }
   };
 
+  const addCustomFocusAspect = () => {
+    if (customFocusAspect.trim() && !focusAspects.includes(customFocusAspect.trim())) {
+      setFocusAspects([...focusAspects, customFocusAspect.trim()]);
+      setCustomFocusAspect('');
+    }
+  };
+
+  const removeFocusAspect = (aspect: string) => {
+    setFocusAspects(focusAspects.filter(a => a !== aspect));
+  };
+
+  // Personalities are fixed at 2 as required
+
+  
   // Fixed audio merging function
   const mergeAudioSegments = async (segments: AudioSegment[]): Promise<string | null> => {
     try {
@@ -389,6 +423,96 @@ const playAll = async (): Promise<void> => {
     }
   };
 
+  const generateYoutubePodcast = async (): Promise<void> => {
+    if (!youtubeUrl || youtubePersonalities.some(p => !p.name || !p.voice)) {
+      toast({
+        title: "Missing information",
+        description: "Please fill in all fields before generating the YouTube podcast.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setGeneratedSegments([]);
+    setFullScript('');
+    setRawAudioSegments([]);
+
+    try {
+      const personality1 = youtubePersonalities[0]?.name || '';
+      const personality2 = youtubePersonalities[1]?.name || '';
+      const voice1Type = youtubePersonalities[0]?.voice || 'male_confident';
+      const voice2Type = youtubePersonalities[1]?.voice || 'female_clear';
+      
+      const response = await fetch('/api/ytscript', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          youtubeUrl,
+          personality1,
+          personality2,
+          voice1Type,
+          voice2Type,
+          podcastStyle,
+          focusAspects: focusAspects.length > 0 ? focusAspects : undefined
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Unknown error' };
+        }
+        throw new Error(errorData.error || 'Failed to generate YouTube podcast');
+      }
+
+      const data = await response.json();
+      
+      const hasQuotaError = data.audioSegments?.some((segment: any) => 
+        segment.error && segment.error.includes('quota_exceeded')
+      );
+      
+      if (hasQuotaError) {
+        toast({
+          title: "API Quota Exceeded",
+          description: "Some audio segments couldn't be generated due to ElevenLabs API quota limitations. You can still save the podcast with available audio or try again later.",
+          variant: "destructive"
+        });
+      }
+      
+      setRawAudioSegments(data.audioSegments || []);
+      
+      const segments = (data.audioSegments || []).map((segment: any) => ({
+        personality: segment.speaker || 'Unknown Speaker',
+        text: segment.text || '',
+        audioUrl: segment.audioBase64 && !segment.error ? `data:audio/mpeg;base64,${segment.audioBase64}` : null,
+        error: segment.error
+      }));
+      
+      setGeneratedSegments(segments);
+      setFullScript(data.script || '');
+      
+      // Initialize refs
+      audioRefs.current = new Array(segments.length).fill(null);
+      
+    } catch (error) {
+      console.error('Error generating YouTube podcast:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+      toast({
+        title: "Generation failed",
+        description: `There was an error generating your YouTube podcast: ${errorMessage}`,
+        variant: "destructive"
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   const downloadScript = () => {
     if (!fullScript) {
       toast({
@@ -430,9 +554,9 @@ const playAll = async (): Promise<void> => {
 
     setIsSaving(true);
     try {
-      const podcastTitle = topic.length > 50 
-        ? `${topic.substring(0, 47)}...` 
-        : topic;
+      const podcastTitle = (topic || youtubeUrl).length > 50 
+        ? `${(topic || youtubeUrl).substring(0, 47)}...` 
+        : (topic || youtubeUrl);
       
       console.log('Starting audio merge process...');
       const mergedAudioBase64 = await mergeAudioSegments(rawAudioSegments);
@@ -456,13 +580,14 @@ const playAll = async (): Promise<void> => {
         console.log('Using individual segments as fallback');
       }
 
+      const currentPersonalities = topic ? personalities : youtubePersonalities;
       const podcastId = await savePodcast({
         userId: user.id,
         title: podcastTitle,
-        personality1: personalities[0]?.name || 'Speaker 1',
-        personality2: personalities[1]?.name || 'Speaker 2',
+        personality1: currentPersonalities[0]?.name || 'Speaker 1',
+        personality2: currentPersonalities[1]?.name || 'Speaker 2',
         script: fullScript,
-        topic,
+        topic: topic || youtubeUrl,
       }, audioSegmentsToSave);
 
       toast({
@@ -494,6 +619,17 @@ const playAll = async (): Promise<void> => {
     audioRefs.current = audioRefs.current.slice(0, generatedSegments.length);
   }, [generatedSegments]);
 
+  const commonFocusAspects = [
+    'Key Arguments',
+    'Main Themes',
+    'Expert Insights',
+    'Controversial Points',
+    'Practical Applications',
+    'Future Implications',
+    'Historical Context',
+    'Statistical Data'
+  ];
+
   return (
     <Card className="w-full max-w-4xl mx-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
       <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 border-b border-blue-100 dark:border-gray-700">
@@ -504,86 +640,240 @@ const playAll = async (): Promise<void> => {
           <CardTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Create Your Podcast</CardTitle>
         </div>
         <CardDescription className="text-gray-600 dark:text-gray-400 mt-2">
-          Enter a topic and add personalities to generate a podcast conversation.
+          Generate podcasts from topics or YouTube videos with AI personalities.
         </CardDescription>
       </CardHeader>
+      
       <CardContent className="space-y-8">
-          <div className="space-y-3 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-gray-800 dark:to-gray-700 p-5 rounded-xl border border-purple-100 dark:border-gray-600 shadow-sm">
-            <div className="flex items-center">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-purple-700 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
-              <Label htmlFor="topic" className="text-lg font-semibold text-purple-800 dark:text-purple-300">Podcast Topic <span className="text-red-500 ml-1">*</span></Label>
-            </div>
-            <Textarea
-              id="topic"
-              placeholder="Enter a detailed description of what you want your podcast to be about..."
-              value={topic}
-              onChange={handleTopicChange}
-              className="min-h-[120px] border-purple-200 dark:border-purple-900 focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50"
-              required
-            />
-            <p className="text-sm text-purple-600 dark:text-purple-400 italic">Describe your podcast topic in detail for better results</p>
-          </div>
-
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <Label className="text-lg font-semibold">Personalities (2 required)</Label>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {personalities.map((personality, index) => (
-              <div key={index} className="p-5 border rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 shadow-sm border-blue-100 dark:border-gray-600">
-                <div className="space-y-3">
-                  <div className="flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-800 dark:text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    <Label htmlFor={`personality-${index}`} className="text-lg font-semibold text-blue-800 dark:text-blue-300">
-                      {index === 0 ? "Personality 1" : "Personality 2"} <span className="text-red-500 ml-1">*</span>
-                    </Label>
-                  </div>
-                  <Input
-                    id={`personality-${index}`}
-                    placeholder="e.g., John, Expert, Host"
-                    value={personality.name}
-                    onChange={(e) => handlePersonalityNameChange(index, e.target.value)}
-                    className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-                    required
-                  />
-                  <div className="space-y-2 mt-4">
-                    <Label htmlFor={`voice-${index}`} className="text-sm font-medium flex items-center text-blue-700 dark:text-blue-400">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                      </svg>
-                      Select Voice
-                    </Label>
-                    <Select
-                      value={personality.voice}
-                      onValueChange={(value) => handlePersonalityVoiceChange(index, value)}
-                    >
-                      <SelectTrigger id={`voice-${index}`} className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
-                        <SelectValue placeholder="Select a voice" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="male_confident">Male - Confident</SelectItem>
-                        <SelectItem value="male_deep">Male - Deep</SelectItem>
-                        <SelectItem value="male_friendly">Male - Friendly</SelectItem>
-                        <SelectItem value="female_clear">Female - Clear</SelectItem>
-                        <SelectItem value="female_young">Female - Young</SelectItem>
-                        <SelectItem value="female_expressive">Female - Expressive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
+        <Tabs defaultValue="topic" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="topic">From Topic</TabsTrigger>
+            <TabsTrigger value="youtube">From YouTube</TabsTrigger>
+          </TabsList>
+          
+          <TabsContent value="topic" className="space-y-6">
+            <div className="space-y-3 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-gray-800 dark:to-gray-700 p-5 rounded-xl border border-purple-100 dark:border-gray-600 shadow-sm">
+              <div className="flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-purple-700 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+                </svg>
+                <Label htmlFor="topic" className="text-lg font-semibold text-purple-800 dark:text-purple-300">Podcast Topic <span className="text-red-500 ml-1">*</span></Label>
               </div>
-            ))}
-          </div>
-        </div>
+              <Textarea
+                id="topic"
+                placeholder="Enter a detailed description of what you want your podcast to be about..."
+                value={topic}
+                onChange={handleTopicChange}
+                className="min-h-[120px] border-purple-200 dark:border-purple-900 focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50"
+                required
+              />
+              <p className="text-sm text-purple-600 dark:text-purple-400 italic">Describe your podcast topic in detail for better results</p>
+            </div>
+
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <Label className="text-lg font-semibold">Personalities (2 required)</Label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {personalities.map((personality, index) => (
+                  <div key={index} className="p-5 border rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 shadow-sm border-blue-100 dark:border-gray-600">
+                    <div className="space-y-3">
+                      <div className="flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-800 dark:text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        <Label htmlFor={`personality-${index}`} className="text-lg font-semibold text-blue-800 dark:text-blue-300">
+                          {index === 0 ? "Personality 1" : "Personality 2"} <span className="text-red-500 ml-1">*</span>
+                        </Label>
+                      </div>
+                      <Input
+                        id={`personality-${index}`}
+                        placeholder="e.g., John, Expert, Host"
+                        value={personality.name}
+                        onChange={(e) => handlePersonalityNameChange(index, e.target.value)}
+                        className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                        required
+                      />
+                      <div className="space-y-2 mt-4">
+                        <Label htmlFor={`voice-${index}`} className="text-sm font-medium flex items-center text-blue-700 dark:text-blue-400">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          </svg>
+                          Select Voice
+                        </Label>
+                        <Select
+                          value={personality.voice}
+                          onValueChange={(value) => handlePersonalityVoiceChange(index, value)}
+                        >
+                          <SelectTrigger id={`voice-${index}`} className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                            <SelectValue placeholder="Select a voice" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="male_confident">Male - Confident</SelectItem>
+                            <SelectItem value="male_deep">Male - Deep</SelectItem>
+                            <SelectItem value="male_friendly">Male - Friendly</SelectItem>
+                            <SelectItem value="female_clear">Female - Clear</SelectItem>
+                            <SelectItem value="female_young">Female - Young</SelectItem>
+                            <SelectItem value="female_expressive">Female - Expressive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </TabsContent>
+          
+          <TabsContent value="youtube" className="space-y-6">
+            <div className="space-y-3 bg-gradient-to-r from-red-50 to-orange-50 dark:from-gray-800 dark:to-gray-700 p-5 rounded-xl border border-red-100 dark:border-gray-600 shadow-sm">
+              <div className="flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-red-700 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <Label htmlFor="youtubeUrl" className="text-lg font-semibold text-red-800 dark:text-red-300">YouTube URL <span className="text-red-500 ml-1">*</span></Label>
+              </div>
+              <Input
+                id="youtubeUrl"
+                placeholder="https://www.youtube.com/watch?v=..."
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                className="border-red-200 dark:border-red-900 focus:ring-2 focus:ring-red-500 focus:ring-opacity-50"
+                required
+              />
+              <p className="text-sm text-red-600 dark:text-red-400 italic">Enter a YouTube video URL to generate a podcast discussion about it</p>
+            </div>
+
+            <div className="space-y-4 bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-gray-800 dark:to-gray-700 p-5 rounded-xl border border-orange-100 dark:border-gray-600 shadow-sm">
+              <div className="flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-orange-700 dark:text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                <Label className="text-lg font-semibold text-orange-800 dark:text-orange-300">Podcast Style</Label>
+              </div>
+              <Select value={podcastStyle} onValueChange={(value: 'discussion' | 'interview' | 'debate' | 'analysis') => setPodcastStyle(value)}>
+                <SelectTrigger className="border-orange-200 dark:border-orange-900 focus:ring-2 focus:ring-orange-500 focus:ring-opacity-50">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="discussion">Discussion</SelectItem>
+                  <SelectItem value="interview">Interview</SelectItem>
+                  <SelectItem value="debate">Debate</SelectItem>
+                  <SelectItem value="analysis">Analysis</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-gray-800 dark:to-gray-700 p-5 rounded-xl border border-green-100 dark:border-gray-600 shadow-sm">
+              <div className="flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-green-700 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                </svg>
+                <Label className="text-lg font-semibold text-green-800 dark:text-green-300">Focus Aspects (Optional)</Label>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {commonFocusAspects.map((aspect) => (
+                  <div key={aspect} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={aspect}
+                      checked={focusAspects.includes(aspect)}
+                      onCheckedChange={(checked) => handleFocusAspectChange(aspect, checked as boolean)}
+                    />
+                    <Label htmlFor={aspect} className="text-sm text-green-700 dark:text-green-300">{aspect}</Label>
+                  </div>
+                ))}
+              </div>
+              <div className="flex space-x-2 mt-4">
+                <Input
+                  placeholder="Add custom focus aspect..."
+                  value={customFocusAspect}
+                  onChange={(e) => setCustomFocusAspect(e.target.value)}
+                  className="border-green-200 dark:border-green-900 focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
+                  onKeyPress={(e) => e.key === 'Enter' && addCustomFocusAspect()}
+                />
+                <Button onClick={addCustomFocusAspect} variant="outline" size="sm" className="border-green-200 text-green-700 hover:bg-green-100 dark:border-green-800 dark:text-green-300 dark:hover:bg-green-900/30">
+                  Add
+                </Button>
+              </div>
+              {focusAspects.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {focusAspects.map((aspect) => (
+                    <span key={aspect} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300">
+                      {aspect}
+                      <button
+                        onClick={() => removeFocusAspect(aspect)}
+                        className="ml-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <Label className="text-lg font-semibold">Personalities (2 required)</Label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {youtubePersonalities.map((personality, index) => (
+                  <div key={index} className="p-5 border rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 shadow-sm border-blue-100 dark:border-gray-600">
+                    <div className="space-y-3">
+                      <div className="flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-800 dark:text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        <Label htmlFor={`youtube-personality-${index}`} className="text-lg font-semibold text-blue-800 dark:text-blue-300">
+                          {index === 0 ? "Personality 1" : "Personality 2"} <span className="text-red-500 ml-1">*</span>
+                        </Label>
+                      </div>
+                      <Input
+                        id={`youtube-personality-${index}`}
+                        placeholder="e.g., John, Expert, Host"
+                        value={personality.name}
+                        onChange={(e) => handleYoutubePersonalityNameChange(index, e.target.value)}
+                        className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                        required
+                      />
+                      <div className="space-y-2 mt-4">
+                        <Label htmlFor={`youtube-voice-${index}`} className="text-sm font-medium flex items-center text-blue-700 dark:text-blue-400">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                          </svg>
+                          Select Voice
+                        </Label>
+                        <Select
+                          value={personality.voice}
+                          onValueChange={(value) => handleYoutubePersonalityVoiceChange(index, value)}
+                        >
+                          <SelectTrigger id={`youtube-voice-${index}`} className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                            <SelectValue placeholder="Select a voice" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="male_confident">Male - Confident</SelectItem>
+                            <SelectItem value="male_deep">Male - Deep</SelectItem>
+                            <SelectItem value="male_friendly">Male - Friendly</SelectItem>
+                            <SelectItem value="female_clear">Female - Clear</SelectItem>
+                            <SelectItem value="female_young">Female - Young</SelectItem>
+                            <SelectItem value="female_expressive">Female - Expressive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </CardContent>
+      
       <CardFooter className="flex flex-col space-y-4">
         <Button
-          onClick={generatePodcast}
+          onClick={topic ? generatePodcast : generateYoutubePodcast}
           disabled={isGenerating}
           className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium py-2 rounded-md transition-all duration-200 shadow-md hover:shadow-lg"
         >
@@ -763,7 +1053,7 @@ const playAll = async (): Promise<void> => {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
                 Full Script
-              </h3>
+                              </h3>
               <div className="bg-white dark:bg-gray-900 p-5 rounded-lg border border-indigo-200 dark:border-indigo-900/50 shadow-inner">
                 <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed overflow-auto max-h-[300px]">
                   {fullScript}
@@ -776,3 +1066,4 @@ const playAll = async (): Promise<void> => {
     </Card>
   );
 }
+
