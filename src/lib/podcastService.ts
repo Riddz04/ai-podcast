@@ -1,7 +1,3 @@
-import { db, storage } from "./firebase";
-import { collection, addDoc, getDocs, query, where, orderBy, serverTimestamp, doc, deleteDoc, updateDoc } from "firebase/firestore";
-import { ref, uploadString, getDownloadURL, deleteObject } from "firebase/storage";
-
 export interface PodcastData {
   id?: string;
   userId: string;
@@ -11,77 +7,116 @@ export interface PodcastData {
   personality2: string;
   script: string;
   audioUrl?: string;
-  createdAt?: any;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export const savePodcast = async (podcastData: PodcastData, audioBase64?: string): Promise<string> => {
+export const savePodcast = async (podcastData: PodcastData, audioSegments?: any[]): Promise<string> => {
   try {
-    // Add timestamp
-    const podcastWithTimestamp = {
-      ...podcastData,
-      createdAt: serverTimestamp(),
-    };
+    console.log('Saving podcast with data:', podcastData);
 
-    // Save podcast metadata to Firestore
-    const docRef = await addDoc(collection(db, "podcasts"), podcastWithTimestamp);
+    const response = await fetch('/api/podcasts', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        podcastData,
+        audioSegments: audioSegments || []
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Failed to save podcast' };
+      }
+      throw new Error(errorData.error || 'Failed to save podcast');
+    }
+
+    const result = await response.json();
+    console.log('Podcast saved successfully:', result.podcastId);
     
-    // If audio data is provided, save it to Storage
-    // if (audioBase64) {
-    //   const storageRef = ref(storage, `podcasts/${podcastData.userId}/${docRef.id}`);
-    //   await uploadString(storageRef, audioBase64, 'data_url');
-    //   const audioUrl = await getDownloadURL(storageRef);
-      
-    //   // Update the document with the audio URL
-    //   await updateDoc(doc(db, "podcasts", docRef.id), {
-    //     audioUrl
-    //   });
-    // }
-
-    return docRef.id;
+    return result.podcastId;
   } catch (error) {
-    console.error("Error saving podcast:", error);
+    console.error('Error saving podcast:', error);
     throw error;
   }
 };
 
 export const getUserPodcasts = async (userId: string): Promise<PodcastData[]> => {
   try {
-    const q = query(
-      collection(db, "podcasts"),
-      where("userId", "==", userId),
-    );
+    console.log('Fetching podcasts for user:', userId);
 
-    const querySnapshot = await getDocs(q);
-    const podcasts: PodcastData[] = [];
-
-    querySnapshot.forEach((doc) => {
-      podcasts.push({
-        id: doc.id,
-        ...doc.data() as PodcastData
-      });
+    const response = await fetch(`/api/podcasts?userId=${encodeURIComponent(userId)}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
-    return podcasts;
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Failed to fetch podcasts' };
+      }
+      throw new Error(errorData.error || 'Failed to fetch podcasts');
+    }
+
+    const result = await response.json();
+    console.log('Podcasts fetched successfully:', result.podcasts?.length || 0);
+    
+    return result.podcasts || [];
   } catch (error) {
-    console.error("Error getting user podcasts:", error);
+    console.error('Error getting user podcasts:', error);
     throw error;
   }
 };
 
 export const deletePodcast = async (podcastId: string, userId: string): Promise<void> => {
   try {
-    // Delete from Firestore
-    await deleteDoc(doc(db, "podcasts", podcastId));
-    
-    // Delete from Storage if exists
-    try {
-      const storageRef = ref(storage, `podcasts/${userId}/${podcastId}`);
-      await deleteObject(storageRef);
-    } catch (error) {
-      console.log("No audio file to delete or error deleting:", error);
+    console.log('Deleting podcast:', podcastId, 'for user:', userId);
+
+    if (!podcastId || !userId) {
+      throw new Error('Both podcastId and userId are required');
     }
+
+    const response = await fetch(`/api/podcasts/${encodeURIComponent(podcastId)}?userId=${encodeURIComponent(userId)}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Failed to delete podcast' };
+      }
+      
+      // Handle specific error cases
+      if (response.status === 404) {
+        throw new Error('Podcast not found or you do not have permission to delete it');
+      } else if (response.status === 400) {
+        throw new Error('Invalid request. Please check your parameters.');
+      } else {
+        throw new Error(errorData.error || 'Failed to delete podcast');
+      }
+    }
+
+    const result = await response.json();
+    console.log('Podcast deleted successfully:', result);
   } catch (error) {
-    console.error("Error deleting podcast:", error);
+    console.error('Error deleting podcast:', error);
     throw error;
   }
 };

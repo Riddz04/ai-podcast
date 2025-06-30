@@ -1,13 +1,12 @@
-// pages/api/generate-podcast.js or app/api/generate-podcast/route.js
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
   baseURL: "https://api.novita.ai/v3/openai",
-  apiKey: process.env.NOVITA_API_KEY as string, // Assuming NOVITA_API_KEY is always set
+  apiKey: process.env.NOVITA_API_KEY as string,
 });
 
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY as string; // Assuming ELEVENLABS_API_KEY is always set
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY as string;
 const ELEVENLABS_BASE_URL = "https://api.elevenlabs.io/v1";
 
 // Define a type for the voice keys
@@ -48,27 +47,47 @@ interface AudioSegment extends ScriptSegment {
   segmentIndex: number;
   audioBase64: string | null;
   voiceId: string | null;
-  duration?: number; // Made optional as it's an estimate
-  error?: string;    // For segments that failed
+  duration?: number;
+  error?: string;
 }
 
 export const POST = async (req: NextRequest): Promise<NextResponse> => {
   try {
+    // Validate environment variables
+    if (!process.env.NOVITA_API_KEY) {
+      console.error('NOVITA_API_KEY is not configured.');
+      return NextResponse.json(
+        { error: "Server configuration error: NOVITA_API_KEY missing." }, 
+        { status: 500 }
+      );
+    }
+
+    if (!process.env.ELEVENLABS_API_KEY) {
+      console.error('ELEVENLABS_API_KEY is not configured.');
+      return NextResponse.json(
+        { error: "Server configuration error: ELEVENLABS_API_KEY missing." }, 
+        { status: 500 }
+      );
+    }
+
+    // Parse and validate request body
+    let requestBody: PodcastRequestBody;
+    try {
+      requestBody = await req.json();
+    } catch (error) {
+      return NextResponse.json(
+        { error: "Invalid JSON in request body" }, 
+        { status: 400 }
+      );
+    }
+
     const { 
       personality1, 
       personality2, 
       podcastTopic, 
       voice1Type = "male_confident", 
       voice2Type = "female_clear" 
-    } = await req.json() as PodcastRequestBody;
-    
-    if (!process.env.NOVITA_API_KEY || !process.env.ELEVENLABS_API_KEY) {
-      console.error('API keys are not configured.');
-      return NextResponse.json(
-        { error: "Server configuration error: API keys missing." }, 
-        { status: 500 }
-      );
-    }
+    } = requestBody;
 
     if (!personality1 || !personality2 || !podcastTopic) {
       return NextResponse.json(
@@ -109,7 +128,8 @@ export const POST = async (req: NextRequest): Promise<NextResponse> => {
 };
 
 async function generateScript(personality1: string, personality2: string, podcastTopic: string): Promise<string> {
-  const prompt = `Create a short realistic podcast conversation between ${personality1} and ${personality2} about "${podcastTopic}". 
+  try {
+    const prompt = `Create a short realistic podcast conversation between ${personality1} and ${personality2} about "${podcastTopic}". 
 
 Format the script exactly like this:
 [SPEAKER: ${personality1}]: [Their dialogue here]
@@ -133,18 +153,30 @@ Example format:
 
 Start the conversation now:`;
 
-  const completion = await openai.chat.completions.create({
-    messages: [{ role: "user", content: prompt }],
-    model: "google/gemma-3-27b-it",
-    stream: false,
-    response_format: { type: "text" }
-  });
-   console.log("Generated script:", completion.choices[0]?.message?.content);
-  return completion.choices[0]?.message?.content || "No script generated";
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: "user", content: prompt }],
+      model: "google/gemma-3-27b-it",
+      stream: false,
+      response_format: { type: "text" },
+      max_tokens: 1000,
+      temperature: 0.7
+    });
+
+    const generatedScript = completion.choices[0]?.message?.content;
+    if (!generatedScript) {
+      throw new Error("No script generated from AI");
+    }
+
+    console.log("Generated script:", generatedScript);
+    return generatedScript;
+  } catch (error) {
+    console.error('Error generating script:', error);
+    throw new Error(`Failed to generate script: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 }
 
 function parseScript(script: string, personality1: string, personality2: string): ScriptSegment[] {
-  const segments = [];
+  const segments: ScriptSegment[] = [];
   const lines = script.split('\n').filter(line => line.trim());
   
   for (const line of lines) {
@@ -154,7 +186,7 @@ function parseScript(script: string, personality1: string, personality2: string)
       const text = match[2].trim();
       
       // Clean up text - remove extra quotation marks, etc.
-      const cleanText = text.replace(/^["']|["']$/g, '');
+      const cleanText = text.replace(/^["']|["']$/g, '').trim();
       
       if (cleanText.length > 0) {
         segments.push({
@@ -166,6 +198,23 @@ function parseScript(script: string, personality1: string, personality2: string)
     }
   }
   
+  if (segments.length === 0) {
+    console.warn('No segments parsed from script, creating fallback segments');
+    // Create fallback segments if parsing fails
+    segments.push(
+      {
+        speaker: personality1,
+        text: `Welcome to our discussion about ${script.substring(0, 100)}...`,
+        isPersonality1: true
+      },
+      {
+        speaker: personality2,
+        text: "Thank you for having me. This is indeed an interesting topic.",
+        isPersonality1: false
+      }
+    );
+  }
+  
   return segments;
 }
 
@@ -175,7 +224,7 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
   
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
-    let currentVoiceId: string | null = null; // To store the voiceId used
+    let currentVoiceId: string | null = null;
     
     try {
       // If quota already exceeded, don't attempt ElevenLabs API calls
@@ -194,11 +243,11 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
       const audioData = await generateSingleAudio(segment.text, currentVoiceId);
       
       audioSegments.push({
-        ...segment, // Spread the original segment properties
+        ...segment,
         segmentIndex: i,
         audioBase64: audioData,
         voiceId: currentVoiceId,
-        duration: Math.ceil(segment.text.length / 10) // Rough estimate: 10 chars per second
+        duration: Math.ceil(segment.text.length / 10)
       });
       
       // Add small delay to avoid rate limiting
@@ -217,8 +266,6 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
       // Generate a fallback audio or use a placeholder
       let fallbackAudio = null;
       try {
-        // Here you could implement a fallback TTS solution
-        // For now, we'll use a simple base64 placeholder
         fallbackAudio = await generateFallbackAudio(segment.text);
       } catch (fallbackError) {
         console.error('Fallback audio generation also failed:', fallbackError);
@@ -226,11 +273,11 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
       
       // Add a placeholder or fallback for failed segments
       audioSegments.push({
-        ...segment, // Spread the original segment properties
+        ...segment,
         segmentIndex: i,
         audioBase64: fallbackAudio,
         error: errorMessage,
-        voiceId: currentVoiceId // Log the voiceId that was attempted
+        voiceId: currentVoiceId
       });
     }
   }
@@ -238,48 +285,122 @@ async function generateAudioSegments(segments: ScriptSegment[], voice1Type: Voic
   return audioSegments;
 }
 
-// Simple fallback audio generation function
+// Enhanced fallback audio generation
 async function generateFallbackAudio(text: string): Promise<string | null> {
-  // This is a placeholder function
-  // In a real implementation, you would integrate with a free TTS service
-  // or use the Web Speech API on the client side
-  
-  // For now, return null to indicate no audio available
-  // The client can handle this by showing a message that audio is unavailable
-  console.log('Using fallback audio generation for:', text.substring(0, 30) + '...');
-  return null;
-  
-  // If you want to implement a real fallback, you could use:
-  // 1. Browser's Web Speech API (client-side)
-  // 2. A free TTS API with higher limits
-  // 3. A local TTS solution
+  try {
+    // Create a simple audio tone as fallback
+    const sampleRate = 22050;
+    const duration = Math.min(text.length / 10, 5); // Max 5 seconds
+    const samples = Math.floor(sampleRate * duration);
+    
+    // Create a simple sine wave
+    const frequency = 440; // A4 note
+    const amplitude = 0.1;
+    
+    const audioData = new Float32Array(samples);
+    for (let i = 0; i < samples; i++) {
+      audioData[i] = amplitude * Math.sin(2 * Math.PI * frequency * i / sampleRate);
+    }
+    
+    // Convert to WAV format (simplified)
+    const buffer = new ArrayBuffer(44 + samples * 2);
+    const view = new DataView(buffer);
+    
+    // WAV header
+    const writeString = (offset: number, string: string) => {
+      for (let i = 0; i < string.length; i++) {
+        view.setUint8(offset + i, string.charCodeAt(i));
+      }
+    };
+    
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples * 2, true);
+    
+    // Convert float samples to 16-bit PCM
+    let offset = 44;
+    for (let i = 0; i < samples; i++) {
+      const sample = Math.max(-1, Math.min(1, audioData[i]));
+      view.setInt16(offset, sample * 0x7FFF, true);
+      offset += 2;
+    }
+    
+    // Convert to base64
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    
+    return btoa(binary);
+  } catch (error) {
+    console.error('Error generating fallback audio:', error);
+    return null;
+  }
 }
 
 async function generateSingleAudio(text: string, voiceId: string): Promise<string> {
-  const response = await fetch(`${ELEVENLABS_BASE_URL}/text-to-speech/${voiceId}`, {
-    method: 'POST',
-    headers: {
-      'Accept': 'audio/mpeg',
-      'Content-Type': 'application/json',
-      'xi-api-key': ELEVENLABS_API_KEY
-    },
-    body: JSON.stringify({
-      text: text,
-      model_id: "eleven_monolingual_v1",
-      voice_settings: {
-        stability: 0.6,
-        similarity_boost: 0.8,
-        style: 0.4,
-        use_speaker_boost: true
-      }
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+  if (!text || text.trim() === '') {
+    throw new Error('Empty text provided for audio generation');
   }
 
-  const audioBuffer = await response.arrayBuffer();
-  return Buffer.from(audioBuffer).toString('base64');
+  if (!voiceId) {
+    throw new Error('No voice ID provided for audio generation');
+  }
+
+  try {
+    const response = await fetch(`${ELEVENLABS_BASE_URL}/text-to-speech/${voiceId}`, {
+      method: 'POST',
+      headers: {
+        'Accept': 'audio/mpeg',
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_API_KEY
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: "eleven_monolingual_v1",
+        voice_settings: {
+          stability: 0.6,
+          similarity_boost: 0.8,
+          style: 0.4,
+          use_speaker_boost: true
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('ElevenLabs API error response:', errorText);
+      
+      if (response.status === 429) {
+        throw new Error('quota_exceeded: ElevenLabs API quota exceeded');
+      } else if (response.status === 401) {
+        throw new Error('ElevenLabs API authentication failed');
+      } else if (response.status === 422) {
+        throw new Error('ElevenLabs API validation error: Invalid voice ID or text');
+      } else {
+        throw new Error(`ElevenLabs API error: ${response.status} - ${errorText}`);
+      }
+    }
+
+    const audioBuffer = await response.arrayBuffer();
+    if (audioBuffer.byteLength === 0) {
+      throw new Error('Empty audio response from ElevenLabs API');
+    }
+
+    return Buffer.from(audioBuffer).toString('base64');
+  } catch (error) {
+    console.error('Error in generateSingleAudio:', error);
+    throw error;
+  }
 }

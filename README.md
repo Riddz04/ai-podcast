@@ -1,36 +1,88 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI‑Podcast 🎙️
 
-## Getting Started
+A Next.js‑based AI‑powered podcast builder that generates podcast episodes from given prompts using Novita and ElevenLabs APIs.
+🌐 **Live Demo**: [pod-ai](https://pod-ai-52ct.vercel.app/)
 
-First, run the development server:
+---
+
+## 📂 Features
+
+- **Generate podcast scripts** using AI prompts  
+- **Convert scripts to audio** using Text‑to‑Speech  
+- **Interactive web UI** with user input form and audio playback  
+- **Built in Next.js + TypeScript**, easy to extend and customize
+
+---
+
+## 🧰 Tech Stack
+
+- **Next.js** (TypeScript) – UI, page routing  
+- **React** – form handling, audio player  
+- **OpenAI API** – chat prompts & responses  
+- **ElevenLabs API** – to convert script to audio
+- **Tailwind CSS** – styling
+- **Vercel** for deployment
+
+---
+
+## 🚀 Quick Start
 
 ```bash
+git clone https://github.com/Riddz04/ai-podcast.git
+cd ai-podcast
+```
+# Install dependencies
+```
+npm install
+# or
+yarn
+```
+
+# Configure env variables
+```
+cp .env.example .env.local
+```
+# Add your keys:
+NOVITA_API_KEY,
+ELEVENLABS_API_KEY,
+FIREBASE .env variables
+
+# Run dev server
+```
 npm run dev
 # or
 yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
+# Access at http://localhost:3000
+Usage
+Visit the homepage, enter a topic or outline
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Click "Generate Podcast"
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Wait while AI creates the script and audio
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Listen to your generated episode in-browser
 
-## Learn More
+🧩 Customize
+Prompt templates – adjust system/user prompts in server-side endpoints
 
-To learn more about Next.js, take a look at the following resources:
+TTS provider integration – replace or customize audio providers
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+UI enhancements – add features like multi-voice support, episode chapters, theme colors
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+📦 Project Structure
+ruby
+```
+/
+├─ pages/
+│  ├─ index.tsx          # Main form & player
+│  └─ api/               # API routes for script & audio generation
+│
+├─ lib/                  # Helpers for OpenAI, TTS, formatting
+├─ components/           # React components (player, form, loader)
+├─ public/               # Static assets (images, icons)
+├─ styles/               # Tailwind or CSS files
+├─ next.config.ts        # Next.js configuration
+├─ package.json
+└─ tsconfig.json
+```
