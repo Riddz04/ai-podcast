@@ -101,7 +101,7 @@ export default function Dashboard() {
           title: "Success",
           description: (
             <div className="flex flex-col">
-              <span>Share link copied to clipboard!</span>
+              <span>Share the link copied to clipboard!</span>
               <a 
                 href={shareUrl} 
                 target="_blank" 
