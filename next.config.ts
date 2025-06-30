@@ -19,10 +19,8 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // Add experimental features for better compatibility
-  experimental: {
-    serverComponentsExternalPackages: ['@supabase/supabase-js'],
-  },
+  // External packages configuration
+  serverExternalPackages: ['@supabase/supabase-js'],
   // Configure webpack for better module resolution
   webpack: (config, { isServer }) => {
     if (!isServer) {

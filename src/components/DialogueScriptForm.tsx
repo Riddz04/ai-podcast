@@ -51,7 +51,7 @@ interface PodcastData {
 export default function DialogueScriptForm() {
   const { user } = useAuth();
   const [topic, setTopic] = useState('');
-  const [personalities, setPersonalities] = useState<Personality[]>([{ name: '', voice: '' }]);
+  const [personalities, setPersonalities] = useState<Personality[]>([{ name: '', voice: '' }, { name: '', voice: '' }]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedSegments, setGeneratedSegments] = useState<PodcastSegment[]>([]);
   const [fullScript, setFullScript] = useState('');
@@ -77,17 +77,7 @@ export default function DialogueScriptForm() {
     setPersonalities(newPersonalities);
   };
 
-  const addPersonality = () => {
-    setPersonalities([...personalities, { name: '', voice: '' }]);
-  };
-
-  const removePersonality = (index: number) => {
-    if (personalities.length > 1) {
-      const newPersonalities = [...personalities];
-      newPersonalities.splice(index, 1);
-      setPersonalities(newPersonalities);
-    }
-  };
+  // Personalities are fixed at 2 as required
 
   const isValidAudioUrl = (url: string | null): boolean => {
     if (!url || url.trim() === '') return false;
@@ -226,8 +216,7 @@ export default function DialogueScriptForm() {
   };
 
   // Fixed Play All function - simplified approach like your original code
- // Clean and simple playAll function - similar to your working playSegment approach
-const playAll = async () => {
+const playAll = async (): Promise<void> => {
   if (currentlyPlaying !== null) {
     audioRefs.current[currentlyPlaying]?.pause();
     setCurrentlyPlaying(null);
@@ -260,14 +249,14 @@ const playAll = async () => {
         await audioElement.play();
         
         // Wait for this segment to finish
-        await new Promise((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           const handleEnded = () => {
             audioElement.removeEventListener('ended', handleEnded);
             audioElement.removeEventListener('error', handleError);
             resolve();
           };
           
-          const handleError = (error) => {
+          const handleError = (error: Event) => {
             audioElement.removeEventListener('ended', handleEnded);
             audioElement.removeEventListener('error', handleError);
             console.error(`Error playing segment ${i}:`, error);
@@ -277,7 +266,7 @@ const playAll = async () => {
           audioElement.addEventListener('ended', handleEnded);
           audioElement.addEventListener('error', handleError);
         });
-      } catch (error) {
+      } catch (error: unknown) {
         console.error(`Failed to play segment ${i}:`, error);
       }
     }
@@ -287,7 +276,7 @@ const playAll = async () => {
 };
 
   // Simple play segment function
-  const playSegment = (index: number) => {
+  const playSegment = (index: number): void => {
     // Check if this segment has audio
     if (!generatedSegments[index].audioUrl) {
       toast({
@@ -312,7 +301,7 @@ const playAll = async () => {
     }
   };
 
-  const generatePodcast = async () => {
+  const generatePodcast = async (): Promise<void> => {
     if (!topic || personalities.some(p => !p.name || !p.voice)) {
       toast({
         title: "Missing information",
@@ -429,7 +418,7 @@ const playAll = async () => {
     }
   };
 
-  const savePodcastToLibrary = async () => {
+  const savePodcastToLibrary = async (): Promise<void> => {
     if (!user || !fullScript || generatedSegments.length === 0) {
       toast({
         title: "Cannot save podcast",
@@ -506,84 +495,90 @@ const playAll = async () => {
   }, [generatedSegments]);
 
   return (
-    <Card className="w-full max-w-4xl mx-auto bg-card dark:bg-card shadow-lg">
-      <CardHeader>
-        <CardTitle className="text-2xl font-bold">Create Your Podcast</CardTitle>
-        <CardDescription>
+    <Card className="w-full max-w-4xl mx-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-800 shadow-xl border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
+      <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 border-b border-blue-100 dark:border-gray-700">
+        <div className="flex items-center space-x-2">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-7 w-7 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+          </svg>
+          <CardTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Create Your Podcast</CardTitle>
+        </div>
+        <CardDescription className="text-gray-600 dark:text-gray-400 mt-2">
           Enter a topic and add personalities to generate a podcast conversation.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="topic">Podcast Topic</Label>
-          <Textarea
-            id="topic"
-            placeholder="Enter a detailed description of what you want your podcast to be about..."
-            value={topic}
-            onChange={handleTopicChange}
-            className="min-h-[100px]"
-          />
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <Label>Personalities</Label>
-            <Button 
-              type="button" 
-              variant="outline" 
-              size="sm" 
-              onClick={addPersonality}
-              className="text-sm"
-            >
-              Add Personality
-            </Button>
+      <CardContent className="space-y-8">
+          <div className="space-y-3 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-gray-800 dark:to-gray-700 p-5 rounded-xl border border-purple-100 dark:border-gray-600 shadow-sm">
+            <div className="flex items-center">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-purple-700 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+              </svg>
+              <Label htmlFor="topic" className="text-lg font-semibold text-purple-800 dark:text-purple-300">Podcast Topic <span className="text-red-500 ml-1">*</span></Label>
+            </div>
+            <Textarea
+              id="topic"
+              placeholder="Enter a detailed description of what you want your podcast to be about..."
+              value={topic}
+              onChange={handleTopicChange}
+              className="min-h-[120px] border-purple-200 dark:border-purple-900 focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50"
+              required
+            />
+            <p className="text-sm text-purple-600 dark:text-purple-400 italic">Describe your podcast topic in detail for better results</p>
           </div>
 
-          {personalities.map((personality, index) => (
-            <div key={index} className="grid gap-4 p-4 border rounded-lg bg-background/50">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor={`personality-${index}`}>Name/Character</Label>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <Label className="text-lg font-semibold">Personalities (2 required)</Label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {personalities.map((personality, index) => (
+              <div key={index} className="p-5 border rounded-xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 shadow-sm border-blue-100 dark:border-gray-600">
+                <div className="space-y-3">
+                  <div className="flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-800 dark:text-blue-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <Label htmlFor={`personality-${index}`} className="text-lg font-semibold text-blue-800 dark:text-blue-300">
+                      {index === 0 ? "Personality 1" : "Personality 2"} <span className="text-red-500 ml-1">*</span>
+                    </Label>
+                  </div>
                   <Input
                     id={`personality-${index}`}
                     placeholder="e.g., John, Expert, Host"
                     value={personality.name}
                     onChange={(e) => handlePersonalityNameChange(index, e.target.value)}
+                    className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                    required
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`voice-${index}`}>Voice</Label>
-                  <Select
-                    value={personality.voice}
-                    onValueChange={(value) => handlePersonalityVoiceChange(index, value)}
-                  >
-                    <SelectTrigger id={`voice-${index}`}>
-                      <SelectValue placeholder="Select a voice" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="male_confident">Male - Confident</SelectItem>
-                      <SelectItem value="male_deep">Male - Deep</SelectItem>
-                      <SelectItem value="male_friendly">Male - Friendly</SelectItem>
-                      <SelectItem value="female_clear">Female - Clear</SelectItem>
-                      <SelectItem value="female_young">Female - Young</SelectItem>
-                      <SelectItem value="female_expressive">Female - Expressive</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <div className="space-y-2 mt-4">
+                    <Label htmlFor={`voice-${index}`} className="text-sm font-medium flex items-center text-blue-700 dark:text-blue-400">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                      </svg>
+                      Select Voice
+                    </Label>
+                    <Select
+                      value={personality.voice}
+                      onValueChange={(value) => handlePersonalityVoiceChange(index, value)}
+                    >
+                      <SelectTrigger id={`voice-${index}`} className="border-blue-200 dark:border-blue-900 focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
+                        <SelectValue placeholder="Select a voice" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="male_confident">Male - Confident</SelectItem>
+                        <SelectItem value="male_deep">Male - Deep</SelectItem>
+                        <SelectItem value="male_friendly">Male - Friendly</SelectItem>
+                        <SelectItem value="female_clear">Female - Clear</SelectItem>
+                        <SelectItem value="female_young">Female - Young</SelectItem>
+                        <SelectItem value="female_expressive">Female - Expressive</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
               </div>
-              {personalities.length > 1 && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => removePersonality(index)}
-                  className="w-full mt-2"
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </CardContent>
       <CardFooter className="flex flex-col space-y-4">
@@ -592,24 +587,59 @@ const playAll = async () => {
           disabled={isGenerating}
           className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-medium py-2 rounded-md transition-all duration-200 shadow-md hover:shadow-lg"
         >
-          {isGenerating ? 'Generating...' : 'Generate Podcast'}
+          {isGenerating ? (
+            <>
+              <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Generating...
+            </>
+          ) : (
+            <>
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              Generate Podcast
+            </>
+          )}
         </Button>
 
         {generatedSegments.length > 0 && (
           <div className="w-full space-y-6 mt-8">
-            <div className="flex justify-between items-center">
-              <h3 className="text-xl font-bold">Generated Podcast</h3>
-              <div className="flex space-x-2">
+            <div className="flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-800 dark:to-gray-700 p-4 rounded-xl border border-blue-100 dark:border-gray-600 shadow-sm">
+              <h3 className="text-xl font-bold text-blue-800 dark:text-blue-300 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                Generated Podcast
+              </h3>
+              <div className="flex space-x-3">
                 <Button 
                   onClick={playAll}
                   variant="outline" 
                   size="sm"
                   disabled={!generatedSegments.some(s => s.audioUrl)}
-                  className="bg-green-600 hover:bg-green-700 text-white border-green-600"
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white border-green-500 shadow-sm hover:shadow transition-all duration-200"
                 >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {isPlayingAll ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z M10 9v6m4-6v6" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    )}
+                  </svg>
                   {isPlayingAll ? 'Stop All' : 'Play All'}
                 </Button>
-                <Button onClick={downloadScript} variant="outline" size="sm">
+                <Button 
+                  onClick={downloadScript} 
+                  variant="outline" 
+                  size="sm"
+                  className="border-blue-200 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/30 transition-all duration-200 shadow-sm"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
                   Download Script
                 </Button>
                 <Button 
@@ -617,55 +647,108 @@ const playAll = async () => {
                   variant="default" 
                   size="sm"
                   disabled={isSaving}
+                  className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 transition-all duration-200 shadow-sm hover:shadow"
                 >
-                  {isSaving ? 'Saving...' : 'Save Podcast'}
+                  {isSaving ? (
+                    <>
+                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                      </svg>
+                      Save Podcast
+                    </>
+                  )}
                 </Button>
               </div>
             </div>
 
             <div className="space-y-4">
               {generatedSegments.map((segment, index) => (
-                <div key={index} className="p-4 border rounded-lg bg-background/50 dark:bg-gray-800/50">
-                  <div className="flex justify-between items-center mb-2">
-                    <h4 className="font-semibold">{segment.personality}</h4>
+                <div key={index} className="p-5 border rounded-xl bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 shadow-sm border-gray-200 dark:border-gray-600">
+                  <div className="flex justify-between items-center mb-3">
+                    <h4 className="font-semibold text-lg flex items-center">
+                      {index % 2 === 0 ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 text-purple-600 dark:text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      )}
+                      <span className={index % 2 === 0 ? "text-blue-700 dark:text-blue-300" : "text-purple-700 dark:text-purple-300"}>
+                        {segment.personality}
+                      </span>
+                    </h4>
                     <div className="flex items-center space-x-2">
                       {currentlyPlaying === index && (
-                        <span className="text-sm text-green-600 font-medium">Playing...</span>
+                        <span className="text-sm text-green-600 dark:text-green-400 font-medium flex items-center">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z" />
+                          </svg>
+                          Playing...
+                        </span>
                       )}
                       <Button
                         onClick={() => playSegment(index)}
-                        variant="ghost"
+                        variant="outline"
                         size="sm"
-                        className="text-primary"
+                        className={index % 2 === 0 
+                          ? "border-blue-200 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/30" 
+                          : "border-purple-200 text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:text-purple-300 dark:hover:bg-purple-900/30"}
                         disabled={!segment.audioUrl}
                       >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          {currentlyPlaying === index ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6M9 9h1v6H9V9zm5 0h1v6h-1V9z" />
+                          ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          )}
+                        </svg>
                         {currentlyPlaying === index ? 'Pause' : 'Play'}
                       </Button>
                     </div>
                   </div>
-                  <p className="text-sm text-muted-foreground mb-3">{segment.text}</p>
+                  <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-inner mb-3">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">{segment.text}</p>
+                  </div>
                   
                   {segment.audioUrl && (
-                    <audio
-                      ref={(el) => { audioRefs.current[index] = el; }}
-                      src={segment.audioUrl}
-                      onEnded={() => setCurrentlyPlaying(null)}
-                      className="w-full"
-                      controls
-                    />
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                      <audio
+                        ref={(el) => { audioRefs.current[index] = el; }}
+                        src={segment.audioUrl}
+                        onEnded={() => setCurrentlyPlaying(null)}
+                        className="w-full"
+                        controls
+                      />
+                    </div>
                   )}
                   
                   {!segment.audioUrl && (
-                    <div className="p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded">
-                      <p className="text-xs text-yellow-700 dark:text-yellow-300">
+                    <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                      <p className="text-xs text-yellow-700 dark:text-yellow-300 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
                         No audio available for this segment.
                       </p>
                     </div>
                   )}
                   
                   {segment.error && (
-                    <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
-                      <p className="text-xs text-red-600 dark:text-red-400">
+                    <div className="mt-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                      <p className="text-xs text-red-600 dark:text-red-400 flex items-center">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
                         <strong>Error:</strong> {segment.error}
                       </p>
                     </div>
@@ -674,11 +757,18 @@ const playAll = async () => {
               ))}
             </div>
 
-            <div className="mt-6 p-4 border rounded-lg bg-background/50 dark:bg-gray-800/50">
-              <h3 className="text-lg font-semibold mb-2">Full Script</h3>
-              <pre className="whitespace-pre-wrap text-sm text-muted-foreground p-4 bg-muted rounded-md overflow-auto max-h-[300px]">
-                {fullScript}
-              </pre>
+            <div className="p-5 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-gray-800 dark:to-gray-700 rounded-xl border border-indigo-100 dark:border-gray-600 shadow-sm">
+              <h3 className="text-lg font-semibold mb-3 text-indigo-800 dark:text-indigo-300 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Full Script
+              </h3>
+              <div className="bg-white dark:bg-gray-900 p-5 rounded-lg border border-indigo-200 dark:border-indigo-900/50 shadow-inner">
+                <pre className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-300 font-mono leading-relaxed overflow-auto max-h-[300px]">
+                  {fullScript}
+                </pre>
+              </div>
             </div>
           </div>
         )}
