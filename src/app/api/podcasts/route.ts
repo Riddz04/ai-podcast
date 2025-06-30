@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // Server-side Supabase client with service role key
+export const runtime = 'nodejs' // 'nodejs' (default) | 'edge'
+export const maxDuration = 30; // Maximum execution time in seconds
 const getSupabaseAdmin = () => {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL as string;
   const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY as string;
@@ -138,82 +140,132 @@ export async function POST(request: NextRequest) {
         );
 
         if (validSegments.length > 0) {
-          // For now, use the first valid segment as the podcast audio
-          const firstValidSegment = validSegments[0];
-          
-          // Clean base64 data - handle data URL format
-          let base64Data: string;
-          if (firstValidSegment.audioBase64.includes(',')) {
-            base64Data = firstValidSegment.audioBase64.split(',')[1];
+          // Process segments in chunks to avoid payload limits
+          const CHUNK_SIZE = 5; // Process 5 segments at a time
+          const processedUrls: string[] = [];
+
+          for (let i = 0; i < validSegments.length; i += CHUNK_SIZE) {
+            const chunk = validSegments.slice(i, i + CHUNK_SIZE);
+            
+            for (const segment of chunk) {
+              try {
+                // Clean base64 data - handle data URL format
+                let base64Data: string;
+                if (segment.audioBase64.includes(',')) {
+                  base64Data = segment.audioBase64.split(',')[1];
+                } else {
+                  base64Data = segment.audioBase64;
+                }
+
+                // Validate base64 format
+                if (!base64Data || base64Data.trim().length === 0) {
+                  console.warn('Invalid base64 data for segment, skipping');
+                  continue;
+                }
+
+                // Check base64 size before processing (approximate file size)
+                const estimatedSize = (base64Data.length * 3) / 4;
+                console.log('Estimated audio size:', estimatedSize, 'bytes');
+
+                // Skip if file is too large (>4MB to be safe with Vercel limits)
+                if (estimatedSize > 4 * 1024 * 1024) {
+                  console.warn('Audio segment too large, skipping. Size:', estimatedSize);
+                  continue;
+                }
+
+                // Convert base64 to buffer
+                const audioBuffer = Buffer.from(base64Data, 'base64');
+                
+                console.log('Audio buffer created, size:', audioBuffer.length);
+
+                // Validate minimum file size
+                if (audioBuffer.length < 1000) {
+                  console.warn('Audio file too small, likely corrupted, skipping');
+                  continue;
+                }
+
+                // Create blob
+                const audioBlob = new Blob([audioBuffer], { 
+                  type: 'audio/mpeg' 
+                });
+
+                console.log('Audio blob created, size:', audioBlob.size);
+
+                // Upload individual segment
+                const fileName = `${podcast.id}_segment_${processedUrls.length}.mp3`;
+                const { data: uploadData, error: uploadError } = await supabase.storage
+                  .from('podcast-audio')
+                  .upload(fileName, audioBlob, {
+                    contentType: 'audio/mpeg',
+                    upsert: true
+                  });
+
+                if (uploadError) {
+                  console.error('Error uploading audio segment:', uploadError);
+                  continue; // Skip this segment but continue with others
+                }
+
+                console.log('Audio segment uploaded successfully:', uploadData);
+                
+                // Get the public URL
+                const { data: urlData } = supabase.storage
+                  .from('podcast-audio')
+                  .getPublicUrl(fileName);
+
+                processedUrls.push(urlData.publicUrl);
+                
+              } catch (segmentError) {
+                console.error('Error processing individual segment:', segmentError);
+                continue; // Skip this segment but continue with others
+              }
+            }
+          }
+
+          // Use the first successfully processed segment as the main audio
+          if (processedUrls.length > 0) {
+            finalAudioUrl = processedUrls[0];
+            console.log('Using first processed audio URL:', finalAudioUrl);
+
+            // Update the podcast record with the audio URL
+            const { error: updateError } = await supabase
+              .from('podcasts')
+              .update({ 
+                audio_url: finalAudioUrl,
+                // Optionally store all segment URLs as JSON
+                audio_segments: processedUrls.length > 1 ? processedUrls : null
+              })
+              .eq('id', podcast.id);
+
+            if (updateError) {
+              console.error('Error updating podcast with audio URL:', updateError);
+              // Don't throw here, podcast is still created
+            } else {
+              console.log('Podcast updated with audio URL');
+            }
           } else {
-            base64Data = firstValidSegment.audioBase64;
+            console.log('No audio segments could be processed successfully');
           }
-
-          // Validate base64 format
-          if (!base64Data || base64Data.trim().length === 0) {
-            throw new Error('Invalid base64 data');
-          }
-
-          // Convert base64 to buffer (more reliable than atob() in server environment)
-          const audioBuffer = Buffer.from(base64Data, 'base64');
-          
-          console.log('Audio buffer created, size:', audioBuffer.length);
-
-          // Validate minimum file size
-          if (audioBuffer.length < 1000) {
-            throw new Error('Audio file too small, likely corrupted');
-          }
-
-          // Create blob
-          const audioBlob = new Blob([audioBuffer], { 
-            type: 'audio/mpeg' 
-          });
-
-          console.log('Audio blob created, size:', audioBlob.size);
-
-          // Simple upload to Supabase Storage
-          const fileName = `${podcast.id}.mp3`;
-          const { data: uploadData, error: uploadError } = await supabase.storage
-            .from('podcast-audio')
-            .upload(fileName, audioBlob, {
-              contentType: 'audio/mpeg',
-              upsert: true
-            });
-
-          if (uploadError) {
-            console.error('Error uploading audio:', uploadError);
-            throw uploadError;
-          }
-
-          console.log('Audio uploaded successfully:', uploadData);
-          
-          // Get the public URL - simple version
-          const { data: urlData } = supabase.storage
-            .from('podcast-audio')
-            .getPublicUrl(fileName);
-
-          finalAudioUrl = urlData.publicUrl;
-          console.log('Audio URL generated:', finalAudioUrl);
-
-          // Update the podcast record with the audio URL
-          const { error: updateError } = await supabase
-            .from('podcasts')
-            .update({ audio_url: finalAudioUrl })
-            .eq('id', podcast.id);
-
-          if (updateError) {
-            console.error('Error updating podcast with audio URL:', updateError);
-            throw updateError;
-          }
-
-          console.log('Podcast updated with audio URL');
         } else {
           console.log('No valid audio segments found');
         }
       } catch (audioError) {
         console.error('Error processing audio segments:', audioError);
         
-        // Continue without audio but log the error
+        // Check if it's specifically a payload size error
+        if (
+          audioError.message?.includes('too large') || 
+          audioError.message?.includes('PAYLOAD_TOO_LARGE') ||
+          audioError.message?.includes('Request Entity Too Large')
+        ) {
+          return NextResponse.json({
+            podcastId: podcast.id,
+            audioUrl: null,
+            error: 'Audio file too large for processing. Try reducing audio quality or splitting into smaller segments.',
+            errorType: 'PAYLOAD_TOO_LARGE'
+          }, { status: 413 });
+        }
+        
+        // Continue without audio but return warning
         return NextResponse.json({
           podcastId: podcast.id,
           audioUrl: null,
@@ -230,11 +282,17 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error in POST /api/podcasts:', error);
     
-    // Check if it's a payload size error
-    if (error.message?.includes('too large') || error.message?.includes('PAYLOAD_TOO_LARGE')) {
+    // Enhanced payload size error detection
+    if (
+      error.message?.includes('too large') || 
+      error.message?.includes('PAYLOAD_TOO_LARGE') ||
+      error.message?.includes('Request Entity Too Large') ||
+      error.code === 'FUNCTION_PAYLOAD_TOO_LARGE' ||
+      error.code === 413
+    ) {
       return NextResponse.json(
         { 
-          error: 'Audio file too large. Try reducing audio quality or length.',
+          error: 'Request payload too large. Audio data exceeds Vercel limits. Try reducing audio quality or length.',
           errorType: 'PAYLOAD_TOO_LARGE'
         },
         { status: 413 }

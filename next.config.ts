@@ -10,6 +10,12 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   // Optional: Disable strict mode if needed
+   api: {
+    bodyParser: {
+      sizeLimit: '10mb', // This only applies to pages/api routes
+    },
+    responseLimit: false,
+  },
   reactStrictMode: false,
   images: {
     remotePatterns: [
