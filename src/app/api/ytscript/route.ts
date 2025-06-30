@@ -266,7 +266,8 @@ Format the script exactly like this:
 [SPEAKER: ${personality2}]: [Their response here]
 
 CRITICAL REQUIREMENTS:
-- MODERATE LENGTH: 1 minute of dialogue
+- SHORT LENGTH: Keep the podcast under 30 seconds (3–5 exchanges total)
+- This is a development version, so keep it concise — just enough to test the pipeline
 - Base the conversation entirely on the video content - reference specific points, quotes, or insights from the transcription
 - ${personality1} and ${personality2} should discuss the video's main themes, arguments, or interesting points
 - NO asterisks (*) or action descriptions - only spoken dialogue
@@ -274,13 +275,10 @@ CRITICAL REQUIREMENTS:
 - Each speaker should have distinct personality traits matching their real-world persona
 - Make it sound natural and conversational, as if they both watched the video and are now discussing it
 - Include brief introductions mentioning the source video
-- Each speaker gets 8-12 exchanges
-- Make sure each speaker has roughly equal speaking time
 - Reference specific parts of the video content naturally in conversation
-- End with brief conclusions and takeaways
 - Use natural speech patterns without formatting symbols
 
-The conversation should feel like two experts who have just watched "${videoInfo.title}" and are now sharing their thoughts and analysis.
+The conversation should feel like two experts who have just watched "${videoInfo.title}" and are now briefly sharing their thoughts.
 
 Start the conversation now:`;
 
@@ -289,7 +287,7 @@ Start the conversation now:`;
       model: "google/gemma-3-27b-it",
       stream: false,
       response_format: { type: "text" },
-      max_tokens: 2000,
+      max_tokens: 1500, // also reduced to keep the response shorter
       temperature: 0.7
     });
 
