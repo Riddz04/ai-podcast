@@ -129,51 +129,52 @@ export const POST = async (req: NextRequest): Promise<NextResponse> => {
 
 async function generateScript(personality1: string, personality2: string, podcastTopic: string): Promise<string> {
   try {
-    const prompt = `Create a short realistic podcast conversation between ${personality1} and ${personality2} about "${podcastTopic}". 
+    const prompt = `Create a *very short* and natural podcast conversation between ${personality1} and ${personality2} about "${podcastTopic}".
+
+This is a test run while the podcast tool is still in development, so keep the dialogue minimal.
 
 Format the script exactly like this:
 [SPEAKER: ${personality1}]: [Their dialogue here]
 [SPEAKER: ${personality2}]: [Their response here]
 
 CRITICAL REQUIREMENTS:
-- VERY SHORT: Maximum 2-3 minutes of dialogue (300-500 words total)
-- Keep it concise for testing purposes
-- NO asterisks (*) or action descriptions - only spoken dialogue
-- NO stage directions like *laughs* or *pauses* - just natural speech
-- Each speaker should have distinct personality traits matching their real-world persona
-- Make it sound natural and conversational
-- Include brief introductions and a quick conclusion
-- Each speaker gets 4-6 short exchanges maximum
-- Make sure each speaker has roughly equal speaking time
-- Use natural speech patterns without formatting symbols
+- MAXIMUM LENGTH: Keep the script under 30 seconds of audio (around 100-150 words total)
+- This is a test version — keep it very short
+- NO asterisks (*) or action descriptions — only spoken dialogue
+- NO stage directions like *laughs* or *pauses* — just natural speech
+- Each speaker gets 2-3 short exchanges maximum
+- Use distinct speech styles matching their public personalities
+- Include a light intro and quick conclusion
+- Equal speaking time for both
+- Make it sound like a real, relaxed podcast moment
 
-Example format:
-[SPEAKER: ${personality1}]: Hey everyone, welcome to today's discussion about ${podcastTopic}. I'm really excited to dive into this topic.
-[SPEAKER: ${personality2}]: Thanks for having me. This is such an important conversation to have right now.
-
-Start the conversation now:`;
+Start the script now:`;
 
     const completion = await openai.chat.completions.create({
       messages: [{ role: "user", content: prompt }],
       model: "google/gemma-3-27b-it",
       stream: false,
       response_format: { type: "text" },
-      max_tokens: 1000,
+      max_tokens: 500,
       temperature: 0.7
     });
 
-    const generatedScript = completion.choices[0]?.message?.content;
+    let generatedScript = completion.choices[0]?.message?.content;
     if (!generatedScript) {
       throw new Error("No script generated from AI");
     }
 
-    console.log("Generated script:", generatedScript);
-    return generatedScript;
+    // 🚫 Remove any action descriptions like *laughs* or *sigh*
+    generatedScript = generatedScript.replace(/\*[^*]+\*/g, '');
+
+    console.log("Cleaned Script:", generatedScript);
+    return generatedScript.trim();
   } catch (error) {
     console.error('Error generating script:', error);
     throw new Error(`Failed to generate script: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
+
 
 function parseScript(script: string, personality1: string, personality2: string): ScriptSegment[] {
   const segments: ScriptSegment[] = [];
