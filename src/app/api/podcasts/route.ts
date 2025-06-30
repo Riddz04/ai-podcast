@@ -139,65 +139,87 @@ export async function POST(request: NextRequest) {
 
         if (validSegments.length > 0) {
           // For now, use the first valid segment as the podcast audio
-          // In the future, you could combine multiple segments
           const firstValidSegment = validSegments[0];
           
-          // Convert base64 to blob
-          const base64Data = firstValidSegment.audioBase64.includes(',') 
-            ? firstValidSegment.audioBase64.split(',')[1] 
-            : firstValidSegment.audioBase64;
-          
-          const byteCharacters = atob(base64Data);
-          const byteNumbers = new Array(byteCharacters.length);
-          for (let i = 0; i < byteCharacters.length; i++) {
-            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          // Clean base64 data - handle data URL format
+          let base64Data: string;
+          if (firstValidSegment.audioBase64.includes(',')) {
+            base64Data = firstValidSegment.audioBase64.split(',')[1];
+          } else {
+            base64Data = firstValidSegment.audioBase64;
           }
-          const byteArray = new Uint8Array(byteNumbers);
-          const audioBlob = new Blob([byteArray], { type: 'audio/mpeg' });
+
+          // Validate base64 format
+          if (!base64Data || base64Data.trim().length === 0) {
+            throw new Error('Invalid base64 data');
+          }
+
+          // Convert base64 to buffer (more reliable than atob() in server environment)
+          const audioBuffer = Buffer.from(base64Data, 'base64');
+          
+          console.log('Audio buffer created, size:', audioBuffer.length);
+
+          // Validate minimum file size
+          if (audioBuffer.length < 1000) {
+            throw new Error('Audio file too small, likely corrupted');
+          }
+
+          // Create blob
+          const audioBlob = new Blob([audioBuffer], { 
+            type: 'audio/mpeg' 
+          });
 
           console.log('Audio blob created, size:', audioBlob.size);
 
-          // Upload to Supabase Storage with public access
-          const fileName = `${podcastData.userId}/${podcast.id}.mp3`;
+          // Simple upload to Supabase Storage
+          const fileName = `${podcast.id}.mp3`;
           const { data: uploadData, error: uploadError } = await supabase.storage
             .from('podcast-audio')
             .upload(fileName, audioBlob, {
               contentType: 'audio/mpeg',
-              upsert: true,
-              cacheControl: '3600'
+              upsert: true
             });
 
           if (uploadError) {
             console.error('Error uploading audio:', uploadError);
-          } else {
-            console.log('Audio uploaded successfully:', uploadData);
-            
-            // Get the public URL for the uploaded file
-            const { data: urlData } = supabase.storage
-              .from('podcast-audio')
-              .getPublicUrl(fileName);
-
-            finalAudioUrl = urlData.publicUrl;
-            console.log('Audio URL generated:', finalAudioUrl);
-
-            // Update the podcast record with the audio URL
-            const { error: updateError } = await supabase
-              .from('podcasts')
-              .update({ audio_url: finalAudioUrl })
-              .eq('id', podcast.id);
-
-            if (updateError) {
-              console.error('Error updating podcast with audio URL:', updateError);
-            } else {
-              console.log('Podcast updated with audio URL');
-            }
+            throw uploadError;
           }
+
+          console.log('Audio uploaded successfully:', uploadData);
+          
+          // Get the public URL - simple version
+          const { data: urlData } = supabase.storage
+            .from('podcast-audio')
+            .getPublicUrl(fileName);
+
+          finalAudioUrl = urlData.publicUrl;
+          console.log('Audio URL generated:', finalAudioUrl);
+
+          // Update the podcast record with the audio URL
+          const { error: updateError } = await supabase
+            .from('podcasts')
+            .update({ audio_url: finalAudioUrl })
+            .eq('id', podcast.id);
+
+          if (updateError) {
+            console.error('Error updating podcast with audio URL:', updateError);
+            throw updateError;
+          }
+
+          console.log('Podcast updated with audio URL');
         } else {
           console.log('No valid audio segments found');
         }
       } catch (audioError) {
         console.error('Error processing audio segments:', audioError);
-        // Continue without audio
+        
+        // Continue without audio but log the error
+        return NextResponse.json({
+          podcastId: podcast.id,
+          audioUrl: null,
+          warning: 'Podcast created but audio processing failed',
+          audioError: audioError.message
+        });
       }
     }
 
@@ -207,6 +229,18 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error in POST /api/podcasts:', error);
+    
+    // Check if it's a payload size error
+    if (error.message?.includes('too large') || error.message?.includes('PAYLOAD_TOO_LARGE')) {
+      return NextResponse.json(
+        { 
+          error: 'Audio file too large. Try reducing audio quality or length.',
+          errorType: 'PAYLOAD_TOO_LARGE'
+        },
+        { status: 413 }
+      );
+    }
+    
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
